@@ -30,3 +30,7 @@ void AudioShutdown();   // call before CloseWindow
 
 // vol 0..1, pitch multiplier, random pitch jitter
 void PlaySfx(int id, float vol = 1.0f, float pitch = 1.0f, float jitter = 0.06f);
+
+// Boss ambience: 0 = normal night, 1 = Kokushibo's oppressive moon-drone.
+// While active the night wind ducks and a deep dissonant drone loops beneath.
+void SetBossDrone(int mode);

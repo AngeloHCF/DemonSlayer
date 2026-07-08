@@ -313,6 +313,7 @@ void Game::StartRun() {
     akaza.Reset();
     douma.Reset();
     kokushibo.Reset();
+    SetBossDrone(0);           // clear Kokushibo's dread from any prior run
     combat.Clear();
     fx.Reset();
     giyu.ResetRun();
@@ -634,6 +635,7 @@ void Game::UpdatePlaying(float dt) {
             giyu.mastery.Save();
             shinobu.mastery.Save();
             rengoku.mastery.Save();
+            SetBossDrone(0);
             state = GState::GameOver;
         }
         return;
@@ -655,8 +657,9 @@ void Game::UpdatePlaying(float dt) {
             introTarget = 2;
             prog.points += cfg::PTS_PER_WAVE;
             state = GState::BossIntro;
-            introT = 3.2f;
-            PlaySfx(SFX_ROAR, 0.9f, 0.65f);
+            introT = 4.2f;                 // the strongest Upper Moon takes his time
+            SetBossDrone(1);               // the night changes the instant he stirs
+            PlaySfx(SFX_ROAR, 1.0f, 0.5f);
         } else if (wave >= cfg::WAVE_DOUMA && !doumaHandled && !douma.active) {
             introTarget = 1;
             prog.points += cfg::PTS_PER_WAVE;
@@ -849,6 +852,10 @@ void Game::DrawBackground() const {
     else if (douma.active && !douma.Defeated()) arena = 2;      // white frost
     else if (kokushibo.active && !kokushibo.Defeated()) arena = 3; // violet moonfield
     bool cold = arena == 1 || arena == 2;
+    // Kokushibo's arena grows darker and more oppressive as he escalates
+    float kokuI = (arena == 3)
+                  ? (kokushibo.phase >= 3 ? 1.0f : kokushibo.phase >= 2 ? 0.6f : 0.3f)
+                  : 0.0f;
 
     // deep night sky
     if (arena == 1)
@@ -856,7 +863,7 @@ void Game::DrawBackground() const {
     else if (arena == 2)
         DrawRectangleGradientV(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, C(10, 12, 26), C(28, 36, 62));
     else if (arena == 3)
-        DrawRectangleGradientV(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, C(10, 5, 20), C(32, 15, 46));
+        DrawRectangleGradientV(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, C(7, 3, 15), C(26, 11, 40));
     else
         DrawRectangleGradientV(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, C(5, 4, 14), C(26, 14, 32));
 
@@ -871,7 +878,7 @@ void Game::DrawBackground() const {
     // moon (blood-tinged for Muzan, ice-pale for the cold moons, violet for Kokushibo)
     Color moonC = boss.active ? C(225, 165, 150)
                 : cold        ? C(216, 226, 246)
-                : arena == 3  ? C(205, 155, 225) : C(216, 210, 190);
+                : arena == 3  ? C(180, 120, 205) : C(216, 210, 190);
     DrawCircleGradient(1060, 120, 90, Fade(moonC, 0.22f), BLANK);
     DrawCircleV({ 1060, 120 }, 46, moonC);
     DrawCircleV({ 1046, 110 }, 7, Fade(C(180, 172, 158), 0.5f));
@@ -923,10 +930,13 @@ void Game::DrawBackground() const {
         DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H,
                       Fade(C(60, 100, 170), arena == 2 ? 0.07f : 0.05f));
     }
-    // violet haze under the six eyes
-    if (arena == 3)
+    // violet haze under the six eyes — and the light draining as he escalates
+    if (arena == 3) {
         DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H,
-                      Fade(C(120, 40, 160), 0.055f + 0.02f * sinf(gt * 2.2f)));
+                      Fade(C(120, 40, 160), 0.05f + 0.03f * kokuI + 0.02f * sinf(gt * 2.2f)));
+        DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H,
+                      Fade(C(4, 0, 10), 0.10f + 0.16f * kokuI));
+    }
 
     // red battle tint while the Demon King lives
     if (boss.active && !boss.Defeated())
@@ -1144,11 +1154,14 @@ void Game::DrawUI() const {
         float bw = 520;
         float f = Clampf(kokushibo.hp / kokushibo.maxHp, 0, 1);
         float x0 = cfg::SCREEN_W * 0.5f - bw * 0.5f;
-        CText("KOKUSHIBO - UPPER MOON ONE", 14, 20, C(200, 150, 240));
+        CText("KOKUSHIBO  -  UPPER MOON ONE", 14, 20, C(205, 150, 242));
         DrawRectangleRounded({ x0, 40, bw, 18 }, 0.5f, 6, C(20, 14, 30));
         if (f > 0)
-            DrawRectangleRounded({ x0 + 3, 43, fmaxf((bw - 6) * f, 5), 12 }, 0.5f, 6, C(160, 100, 220));
-        DrawRectangle((int)(x0 + bw * 0.40f), 40, 2, 18, C(55, 40, 75));
+            DrawRectangleRounded({ x0 + 3, 43, fmaxf((bw - 6) * f, 5), 12 }, 0.5f, 6, C(168, 104, 226));
+        // phase thresholds: the blade quickens at 66%, the transformation at 33%
+        DrawRectangle((int)(x0 + bw * 0.66f), 40, 2, 18, C(70, 50, 95));
+        DrawRectangle((int)(x0 + bw * 0.33f), 40, 2, 18, C(130, 40, 62));
+        DrawText(TextFormat("PHASE %d", kokushibo.phase), (int)(x0 + bw - 66), 42, 13, C(212, 150, 242));
         if (kokushibo.vulnerable)  CText("VULNERABLE - STRIKE NOW!", 64, 16, C(255, 220, 90));
         else if (kokushibo.guardBroken > 0) CText("GUARD BROKEN", 64, 16, C(210, 200, 185));
     } else if (akaza.active && !akaza.Defeated()) {
@@ -1338,14 +1351,25 @@ void Game::DrawOverlays() const {
             CText("frost slows your steps: shatter the lotus before it opens",
                   428, 17, Fade(C(225, 238, 250), p));
         } else if (introTarget == 2) {
-            float p = 1.0f - introT / 3.2f;
-            DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(C(24, 8, 36), 0.35f + 0.3f * p));
-            int size = (int)(38 + 30 * p);
-            CText("UPPER  MOON  ONE  -  KOKUSHIBO", 280, size, Fade(C(205, 155, 240), Clampf(p * 2, 0, 1)));
-            CText("the moon-blade sweeps the whole field - CROUCH beneath the long slashes",
-                  400, 17, Fade(C(230, 220, 245), p));
-            CText("six eyes see everything. His recovery is your only door.",
-                  428, 17, Fade(C(230, 220, 245), p));
+            float p = 1.0f - introT / 4.2f;
+            // the arena is swallowed in near-black; only his six eyes remain
+            DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(C(6, 1, 12), 0.5f + 0.45f * p));
+            float eyeA = Clampf(p * 1.6f, 0, 1);
+            float cx = cfg::SCREEN_W * 0.5f;
+            for (int r = 0; r < 2; r++)
+                for (int c = 0; c < 3; c++) {
+                    Vector2 e = { cx + (c - 1) * 66.0f, 234.0f + r * 40.0f };
+                    float tw = 0.6f + 0.4f * sinf(gt * 4.0f + r * 3 + c);
+                    DrawCircleV(e, 16, Fade(C(255, 40, 40), 0.18f * eyeA * tw));
+                    DrawCircleV(e, 7, Fade(C(255, 60, 60), eyeA));
+                    DrawCircleV(e, 3, Fade(C(255, 210, 210), eyeA));
+                }
+            CText("UPPER  MOON  ONE", 348, (int)(34 + 24 * p), Fade(C(210, 160, 245), Clampf(p * 2, 0, 1)));
+            CText("K O K U S H I B O", 402, 30, Fade(C(234, 202, 250), Clampf(p * 2, 0, 1)));
+            CText("the strongest of the Twelve Kizuki. six eyes see everything.",
+                  456, 17, Fade(C(224, 210, 240), p));
+            CText("his moon-blade sweeps the whole field - CROUCH beneath the long slashes",
+                  482, 17, Fade(C(224, 210, 240), p));
         } else {
             float p = 1.0f - introT / 4.6f;
             DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(C(40, 0, 10), 0.35f + 0.25f * p));
@@ -1387,6 +1411,16 @@ void Game::DrawOverlays() const {
         if (fmodf(gt, 1.2f) < 0.75f)
             CText("ENTER - rise again", 440, 22, C(220, 200, 150));
     }
+
+    // Kokushibo's transformation declaration — a cinematic that outlasts the flash
+    if (kokushibo.active && kokushibo.declareT > 0 && state == GState::Playing) {
+        float d = kokushibo.declareT;
+        float a = Clampf(d > 2.4f ? (2.8f - d) / 0.4f : d / 1.0f, 0, 1);   // in, hold, out
+        DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(C(10, 0, 16), 0.4f * a));
+        CText("I  WILL  NOT  DIE", 248, 66, Fade(C(232, 58, 82), a));
+        CText("MOON BREATHING  -  FOURTEENTH FORM: CATASTROPHE, TENMAN CRESCENT MOONS",
+              332, 18, Fade(C(214, 165, 248), a));
+    }
 }
 
 void Game::Draw() {
@@ -1422,6 +1456,7 @@ void Game::Draw() {
     EndMode2D();
 
     DrawVignette();
+    fx.DrawScreen();        // dark flashes / crescent bursts, over the world
     if (state != GState::Title) DrawUI();
     DrawOverlays();
 }

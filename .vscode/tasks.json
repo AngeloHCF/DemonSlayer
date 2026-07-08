@@ -9,11 +9,12 @@
                 "src/main.cpp", "src/game.cpp", "src/player.cpp",
                 "src/enemy.cpp", "src/boss.cpp", "src/effects.cpp",
                 "src/combat.cpp", "src/audio.cpp", "src/companion.cpp",
+                "src/shinobu.cpp", "src/rengoku.cpp",
                 "src/akaza.cpp", "src/moons.cpp",
                 "-o", "demonslayer.exe",
                 "-std=c++17", "-O2",
                 "-lraylib", "-lglfw3", "-lopengl32", "-lgdi32", "-lwinmm",
-                "-static", "-static-libgcc", "-static-libstdc++"
+                "-static-libgcc", "-static-libstdc++"
             ],
             "options": { "cwd": "${workspaceFolder}" },
             "group": { "kind": "build", "isDefault": true },

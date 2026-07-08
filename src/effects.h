@@ -37,6 +37,7 @@ public:
     void Update(float dt);           // call with REAL dt (unscaled by hitstop)
     void DrawWorld() const;          // particles + rings (inside camera)
     void DrawTexts() const;          // floating damage numbers (inside camera)
+    void DrawScreen() const;         // full-screen flashes (screen space, over world)
 
     // emitters -----------------------------------------------------
     void Sparks(Vector2 p, float angleDeg, float spreadDeg, int n,
@@ -59,12 +60,14 @@ public:
     void BloodSpray(Vector2 p, int dir, float scale = 1.0f);   // brutal arterial gush
     void Dust(Vector2 p);
     void Ember(Vector2 p);
+    void MoonWind(Vector2 p, int dir, Color c, float scale = 1.0f); // driven crescent gale
     void Ring(Vector2 p, float startR, float maxR, float speed, float thick, Color c);
     void Text(Vector2 p, Color c, float scale, const char* fmt, ...);
 
     // game-feel ------------------------------------------------------
     void AddShake(float amount);     // 0..1 trauma
     void AddHitstop(float seconds);
+    void Flash(Color c, float strength);  // punch a full-screen tint that decays
     float TimeScale() const;         // ~0.05 while hitstop active, else 1
     Vector2 ShakeOffset() const { return shakeOff; }
 
@@ -76,4 +79,7 @@ private:
     float trauma = 0.0f;
     float hitstop = 0.0f;
     Vector2 shakeOff{0, 0};
+    Color   flashCol{0, 0, 0, 0};
+    float   flashA = 0.0f;           // current full-screen flash alpha
+    float   flashDecay = 4.0f;       // how fast the current flash fades
 };

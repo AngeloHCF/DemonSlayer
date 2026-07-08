@@ -85,7 +85,7 @@ The campaign is now **17 waves with three Upper Moons standing between you and M
 
 - **Waves 1–6 → Akaza (Upper Moon Three)** — falls from the sky into a cold, snow-swept arena. Fist barrages, heavy dash blow, ground shockwaves with fanned fist orbs, crater leaps. Rejoices (speeds up) below 40%.
 - **Waves 7–11 → Douma (Upper Moon Two)** — a blizzard arena. Ice shard fans that **chill** you (slowed steps), **frozen lotus** eruptions blooming under your feet, and a freezing breath cone. He glides away when pressed — never stand still.
-- **Waves 12–17 → Kokushibo (Upper Moon One)** — a violet moonfield. Moon-arc crescent barrages, flash-step cross slashes, and arena-wide **long slashes at chest height — CROUCH under them**. Six eyes see everything.
+- **Waves 12–17 → Kokushibo (Upper Moon One)** — a violet moonfield that darkens the instant he stirs, beneath a deep, dissonant drone. The strongest Upper Moon walks toward you — slow, silent, unbothered — then *explodes* into layered crescent curtains (weave the seams), chained arena-wide **long slashes: CROUCH the chest cut, JUMP the low sweep**, flash-step cross slashes, and point-blank sword combos. He will occasionally **stop, stare you down, then vanish and reappear at your side with an instant slash** — the vanish is your only warning, so don't panic-dodge early. Six eyes see everything; his recovery is your only door.
 - **Then Muzan.** The Demon King becomes a five-minute survival battle: stall him until sunrise, because blade damage cannot finish him.
 
 Each fallen Moon grants points (+4/+5/+6) and a heal, then the horde resumes, harder: more demons per wave, faster spawns, tougher mixes, higher HP/damage, and quicker, more aggressive attacks the deeper you go.
@@ -93,7 +93,7 @@ Each fallen Moon grants points (+4/+5/+6) and a heal, then the horde resumes, ha
 **Desperation phases** — at their breaking point, the great demons refuse to lose (deliberately overwhelming; survive them however you can):
 
 - **Akaza (40%)** — *"AKAZA CAN NO LONGER SENSE YOU"*: a blind spiral storm of air blasts fired in every direction for three full seconds.
-- **Kokushibo (40%)** — *"I WILL NOT DIE"*: hundreds of moon crescents erupt from the ground across the entire battlefield.
+- **Kokushibo — three phases** — the blade quickens at **66%**. At **33%** he refuses the grave: *"I WILL NOT DIE"* — a cinematic transformation with an enormous eruption of moon crescents, then he returns **faster and more aggressive**, periodically flooding the arena with sky-and-earth crescent storms (**Fourteenth Form: Catastrophe, Tenman Crescent Moons**).
 - **Muzan** — his desperation is no longer a single threshold. As dawn approaches he repeatedly triggers violent blood-whip eruptions, arena-wide blasts, and invulnerable transformations.
 
 Power scale is faithful to the anime: **Giyu < Akaza < Douma < Kokushibo < Muzan**. Giyu creates openings against all of them, but every Upper Moon actively hunts him and will win a prolonged duel.

@@ -24,10 +24,13 @@ enum MoonKind { MOON_DOUMA = 0, MOON_KOKU = 1 };
 
 enum class MState {
     Inactive, Intro, Stalk,
-    TeleA, AtkA,       // Douma: ice shard fans      | Koku: moon-arc barrage
+    TeleA, AtkA,       // Douma: ice shard fans      | Koku: layered crescent barrage
     TeleB, AtkB,       // Douma: frozen lotus        | Koku: long slash (duckable)
     TeleC, AtkC,       // Douma: freezing breath     | Koku: flash cross
-    Desperation,       // Koku at 40%: "I WILL NOT DIE" ground-crescent storm
+    Stare, AtkFlash,   // Koku only: silent glare, then vanish + instant slash
+    Combo,             // Koku only: close-range Moon-Dragon sword combo
+    Storm,             // Koku phase 3: repeatable sky-and-earth crescent storm
+    Desperation,       // Koku at 33%: "I WILL NOT DIE" transformation storm
     Recover,
     Dying, Dead
 };
@@ -76,6 +79,7 @@ public:
     int   phase = 1;
     bool  vulnerable = false;
     float guardBroken = 0;
+    float declareT = 0;            // Kokushibo's "I WILL NOT DIE" banner timer
     HitMemory hitMem;
 
 private:
@@ -97,6 +101,20 @@ private:
     bool  preyRengoku = false;
     std::vector<Shard> shards;
     std::vector<Lotus> lotus;
-    Rectangle slashBand{};         // koku long-slash telegraph
+    Rectangle slashBand{};         // koku long-slash / flash-slash telegraph
+    Rectangle slashBand2{};        // koku second stacked band (phase 2+)
     bool  slashArmed = false;
+    bool  slashArmed2 = false;
+
+    // --- Kokushibo: presence, escalation, and suspense --------------
+    float auraPulse = 0;           // ever-present menace glow
+    float walkBob = 0;             // slow confident stride
+    bool  transformed = false;     // has unleashed the 33% transformation
+    int   comboHit = 0;            // Moon-Dragon combo step
+    float subT = 0;                // sub-phase timer (combos, double slashes)
+    int   subStep = 0;             // sub-phase index
+    float stareGlare = 0;          // 0..1 intensity while staring the player down
+    float stormCd = 0;             // gate on phase-3 crescent storms
+    float stareCd = 0;             // gate on the silent-stare ambush
+    Vector2 markPos{};             // remembered prey spot for delayed punishes
 };

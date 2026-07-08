@@ -36,6 +36,9 @@ struct SfxPool {                 // aliases allow overlapping playback
 
 static SfxPool g_sfx[SFX_COUNT];
 static Sound g_ambient{};
+static Sound g_drone{};          // Kokushibo's oppressive moon-drone (looping)
+static int   g_droneMode = 0;    // 0 off, 1 Kokushibo
+static float g_ambVol = 0.55f;   // current night-wind volume (ducked under drone)
 static bool g_ready = false;
 
 static void Register(int id, Wave w, int aliases) {
@@ -256,6 +259,25 @@ static Wave GenAmbient() {
     }
     return w;
 }
+static Wave GenMoonDrone() {
+    // Kokushibo's presence: a deep, slow, dissonant drone. Two low tones a
+    // hair apart grind against each other; a distant metallic overtone swells
+    // and fades. All partials complete whole cycles over the 4s loop.
+    const float len = 4.0f;
+    Wave w = MakeWave(len); short* d = SD(w);
+    float lp = 0;
+    for (unsigned int i = 0; i < w.frameCount; i++) {
+        float t = i / (float)SR;
+        float swell = 0.58f + 0.42f * sinf(2 * PI * 1.0f * t / len);      // 1 cycle
+        float low   = 0.52f * sinf(2 * PI * 49.0f * t)                    // 196 cycles
+                    + 0.40f * sinf(2 * PI * 55.0f * t);                   // 220 cycles
+        float bell  = 0.10f * sinf(2 * PI * 196.0f * t)                   // 784 cycles
+                    * (0.5f + 0.5f * sinf(2 * PI * 2.0f * t / len));      // 2 cycles
+        lp += (NoiseF() - lp) * 0.02f;                                    // subterranean bed
+        d[i] = Q((low * swell + bell + lp * 0.6f) * 0.72f, 12500);
+    }
+    return w;
+}
 
 // ----------------------------------------------------------------
 void AudioInit() {
@@ -284,12 +306,33 @@ void AudioInit() {
     g_ambient = LoadSoundFromWave(amb);
     UnloadWave(amb);
     SetSoundVolume(g_ambient, 0.55f);
+
+    Wave dr = GenMoonDrone();
+    g_drone = LoadSoundFromWave(dr);
+    UnloadWave(dr);
+    SetSoundVolume(g_drone, 0.0f);
     g_ready = true;
 }
 
 void AudioUpdate() {
     if (!g_ready) return;
+    // the night wind ducks beneath Kokushibo's drone, and swells back after
+    float targetAmb = (g_droneMode == 1) ? 0.16f : 0.55f;
+    g_ambVol += (targetAmb - g_ambVol) * 0.04f;
+    SetSoundVolume(g_ambient, g_ambVol);
     if (!IsSoundPlaying(g_ambient)) PlaySound(g_ambient);   // endless night wind
+
+    if (g_droneMode == 1) {
+        SetSoundVolume(g_drone, 0.62f);
+        if (!IsSoundPlaying(g_drone)) PlaySound(g_drone);   // endless dread
+    } else if (IsSoundPlaying(g_drone)) {
+        StopSound(g_drone);
+    }
+}
+
+void SetBossDrone(int mode) {
+    g_droneMode = mode;
+    if (g_ready && mode == 0 && IsSoundPlaying(g_drone)) StopSound(g_drone);
 }
 
 void AudioShutdown() {
@@ -299,6 +342,7 @@ void AudioShutdown() {
             UnloadSound(g_sfx[i].base);
         }
         UnloadSound(g_ambient);
+        UnloadSound(g_drone);
     }
     CloseAudioDevice();
 }

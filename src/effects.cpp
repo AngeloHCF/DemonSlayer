@@ -16,6 +16,7 @@ static Color CL(Color a, Color b, float t) {
 void Effects::Reset() {
     parts.clear(); rings.clear(); texts.clear();
     trauma = 0; hitstop = 0; shakeOff = {0, 0};
+    flashCol = {0, 0, 0, 0}; flashA = 0; flashDecay = 4.0f;
 }
 
 void Effects::Push(const Particle& p) {
@@ -27,9 +28,16 @@ float Effects::TimeScale() const { return hitstop > 0 ? 0.05f : 1.0f; }
 void Effects::AddShake(float amount)   { trauma = Clampf(trauma + amount, 0, 1); }
 void Effects::AddHitstop(float seconds){ hitstop = fmaxf(hitstop, seconds); }
 
+void Effects::Flash(Color c, float strength) {
+    // brighter/darker flashes win; a stronger punch also lingers a touch longer
+    if (strength >= flashA) { flashCol = c; flashA = Clampf(strength, 0, 1); }
+    flashDecay = Lerpf(4.0f, 1.6f, Clampf(strength, 0, 1));
+}
+
 void Effects::Update(float dt) {
     if (hitstop > 0) hitstop -= dt;
     trauma = Clampf(trauma - 1.7f * dt, 0, 1);
+    flashA = fmaxf(flashA - flashDecay * dt, 0);
     float mag = trauma * trauma;
     shakeOff = { frnd(-1, 1) * 18.0f * mag, frnd(-1, 1) * 13.0f * mag };
 
@@ -95,6 +103,11 @@ void Effects::DrawTexts() const {
         DrawText(t.txt, (int)t.pos.x - w / 2 + 1, (int)t.pos.y + 1, fs, Fade(BLACK, a * 0.7f));
         DrawText(t.txt, (int)t.pos.x - w / 2, (int)t.pos.y, fs, Fade(t.col, a));
     }
+}
+
+void Effects::DrawScreen() const {
+    if (flashA > 0.003f)
+        DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(flashCol, flashA));
 }
 
 // --- emitters ---------------------------------------------------
@@ -459,6 +472,32 @@ void Effects::Ember(Vector2 p) {
     pt.c0 = C(230, 60, 50, 200); pt.c1 = C(120, 20, 30, 0);
     pt.grav = -20; pt.drag = 0.4f; pt.shape = 0;
     Push(pt);
+}
+
+void Effects::MoonWind(Vector2 p, int dir, Color c, float scale) {
+    // long horizontal streaks torn along the blade's path — a driven gale
+    int n = (int)(9 * scale);
+    for (int i = 0; i < n; i++) {
+        Particle pt;
+        pt.pos = { p.x + frnd(-40, 40) * scale, p.y + frnd(-70, 70) * scale };
+        pt.vel = { dir * frnd(420, 900) * scale, frnd(-40, 40) };
+        pt.maxLife = pt.life = frnd(0.18f, 0.4f);
+        pt.size0 = frnd(3, 6) * scale; pt.size1 = 0;
+        pt.c0 = Fade(c, 0.85f); pt.c1 = Fade(c, 0);
+        pt.drag = 2.0f; pt.shape = 1;
+        Push(pt);
+    }
+    // a few pale motes swept along
+    for (int i = 0; i < (int)(4 * scale); i++) {
+        Particle pt;
+        pt.pos = { p.x + frnd(-30, 30), p.y + frnd(-60, 60) };
+        pt.vel = { dir * frnd(240, 560), frnd(-60, 60) };
+        pt.maxLife = pt.life = frnd(0.25f, 0.5f);
+        pt.size0 = frnd(1.5f, 3); pt.size1 = 0;
+        pt.c0 = C(235, 220, 255, 200); pt.c1 = C(200, 170, 245, 0);
+        pt.drag = 1.6f; pt.shape = 0;
+        Push(pt);
+    }
 }
 
 void Effects::Ring(Vector2 p, float startR, float maxR, float speed, float thick, Color c) {

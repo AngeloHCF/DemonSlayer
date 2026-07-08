@@ -9,12 +9,24 @@
 #include <cmath>
 #include <algorithm>
 
-// per-kind tuning: Douma < Kokushibo, both above Akaza, below Muzan
-static float MoonHp(int k)    { return k == MOON_DOUMA ? 1000.0f : 1150.0f; }
-static float MoonSpd(int k)   { return k == MOON_DOUMA ? 240.0f : 290.0f; }
-static float MoonGuard(int k) { return k == MOON_DOUMA ? 0.62f : 0.58f; }
+// per-kind tuning: Douma < Kokushibo, both above Akaza, below Muzan.
+// Kokushibo is the strongest Upper Moon: a wall of HP and relentless pressure.
+static float MoonHp(int k)    { return k == MOON_DOUMA ? 1000.0f : 2050.0f; }
+static float MoonSpd(int k)   { return k == MOON_DOUMA ? 240.0f : 300.0f; }
+static float MoonGuard(int k) { return k == MOON_DOUMA ? 0.62f : 0.55f; }
 static Color MoonCol(int k)   { return k == MOON_DOUMA ? Color{ 150, 220, 245, 255 }
                                                        : Color{ 190, 130, 235, 255 }; }
+
+// Kokushibo never runs. He walks toward you — slow, certain, unbothered —
+// and only *explodes* into motion for a strike. Speed climbs with each phase.
+static float KokuWalk(int phase) {
+    return 118.0f * (phase >= 3 ? 1.42f : phase >= 2 ? 1.20f : 1.0f);
+}
+// Per-crescent bite. Bounded so the screen-filling curtains pressure position
+// rather than delete you outright (the player carries 200 HP + 0.9s i-frames).
+static float KokuCrescentDmg(int phase) {
+    return phase >= 3 ? 21.0f : phase >= 2 ? 18.0f : 16.0f;
+}
 
 void UpperMoon::Reset() {
     active = false;
@@ -38,6 +50,17 @@ void UpperMoon::Reset() {
     shards.clear();
     lotus.clear();
     slashArmed = false;
+    slashArmed2 = false;
+    slashBand2 = {};
+    auraPulse = 0;
+    walkBob = 0;
+    transformed = false;
+    comboHit = 0;
+    subT = 0; subStep = 0;
+    stareGlare = 0;
+    stormCd = 0;
+    stareCd = 6.0f;
+    markPos = {};
 }
 
 void UpperMoon::Activate(Vector2 p) {
@@ -45,9 +68,16 @@ void UpperMoon::Activate(Vector2 p) {
     active = true;
     pos = p;
     state = MState::Intro;
-    stateTimer = 1.6f;
-    if (kind == MOON_DOUMA) PlaySfx(SFX_MIST, 1.0f, 0.7f);
-    else                    PlaySfx(SFX_ROAR, 0.9f, 0.8f);
+    if (kind == MOON_DOUMA) {
+        stateTimer = 1.6f;
+        PlaySfx(SFX_MIST, 1.0f, 0.7f);
+    } else {
+        // the strongest Upper Moon arrives: the night itself recoils
+        stateTimer = 2.2f;
+        ghostA = 0.0f;                 // materialises out of the dark
+        SetBossDrone(1);
+        PlaySfx(SFX_ROAR, 1.0f, 0.5f);
+    }
 }
 
 Rectangle UpperMoon::Rect() const {
@@ -98,17 +128,42 @@ void UpperMoon::ChooseAttack(const Player& player, const Giyu* ally, const Shino
             default:            stateTimer = 0.42f; break;
         }
     } else {
-        // a swordsman: pressure, reach, and sudden appearances
-        if (dist > 320)      state = roll < 50 ? MState::TeleB : MState::TeleC;
-        else                 state = roll < 40 ? MState::TeleA
-                                   : roll < 70 ? MState::TeleB : MState::TeleC;
-        switch (state) {
-            case MState::TeleA: stateTimer = 0.40f; break;
-            case MState::TeleB: stateTimer = 0.55f; break;   // the long slash telegraph
-            default:            stateTimer = 0.38f; break;
+        // Kokushibo — the swordsman: relentless pressure, reach, and sudden
+        // appearances. His silent stare baits panic; his phase-3 storms drown
+        // the arena in moonlight.
+        markPos = prey;                          // remember the spot to punish later
+        if (stareCd <= 0 && GetRandomValue(0, 99) < (phase >= 2 ? 32 : 24)) {
+            state = MState::Stare;               // a pause held a beat too long
+            stateTimer = frnd(0.55f, 0.95f);
+            stareCd = frnd(6.5f, 9.0f);
+        } else if (phase >= 3 && stormCd <= 0 && GetRandomValue(0, 99) < 42) {
+            state = MState::Storm;               // the sky fills with crescents
+            stateTimer = 2.4f;
+            subStep = 0; tickT = 0;
+            stormCd = frnd(6.0f, 8.5f);
+        } else if (dist < 100 && GetRandomValue(0, 99) < 60) {
+            state = MState::Combo;               // point-blank: draw and cut
+            stateTimer = 0.5f;
+            comboHit = 0; subT = 0.18f;
+        } else {
+            if (dist > 300) state = roll < 46 ? MState::TeleA
+                                  : roll < 74 ? MState::TeleB : MState::TeleC;
+            else            state = roll < 42 ? MState::TeleA
+                                  : roll < 66 ? MState::TeleB : MState::TeleC;
+            switch (state) {
+                case MState::TeleA: stateTimer = 0.34f; break;
+                case MState::TeleB: stateTimer = 0.50f; break;   // long-slash telegraph
+                default:            stateTimer = 0.30f; break;
+            }
         }
     }
-    if (phase >= 2) stateTimer *= 0.75f;
+    // tempo tightens as they weaken; Kokushibo quickens far more, but the
+    // suspense stare and the gathering storm keep their full deliberate weight.
+    if (kind == MOON_DOUMA) {
+        if (phase >= 2) stateTimer *= 0.75f;
+    } else if (state != MState::Stare && state != MState::Storm) {
+        stateTimer *= (phase >= 3 ? 0.60f : phase >= 2 ? 0.78f : 1.0f);
+    }
 }
 
 void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Rengoku* rengoku,
@@ -120,6 +175,13 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, R
     guardBroken = fmaxf(guardBroken - dt, 0);
     openingCd = fmaxf(openingCd - dt, 0);
     ghostA += (1.0f - ghostA) * Clampf(6.0f * dt, 0, 1);
+    // Kokushibo's ever-present menace + escalation timers
+    auraPulse += dt;
+    walkBob += dt;
+    declareT = fmaxf(declareT - dt, 0);
+    stareCd = fmaxf(stareCd - dt, 0);
+    stormCd = fmaxf(stormCd - dt, 0);
+    if (state != MState::Stare) stareGlare = fmaxf(stareGlare - 3.0f * dt, 0);
 
     if (poisonT > 0 && state != MState::Dying) {
         poisonT -= dt;
@@ -133,21 +195,41 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, R
         }
     }
 
-    int newPhase = hp > maxHp * 0.40f ? 1 : 2;
+    int newPhase;
+    if (kind == MOON_KOKU)
+        newPhase = hp > maxHp * 0.66f ? 1 : hp > maxHp * 0.33f ? 2 : 3;
+    else
+        newPhase = hp > maxHp * 0.40f ? 1 : 2;
+
     if (newPhase != phase && state != MState::Dying && state != MState::Desperation) {
+        int wasPhase = phase;
         phase = newPhase;
         if (kind == MOON_KOKU) {
-            // desperation: the strongest swordsman alive refuses the grave
-            state = MState::Desperation;
-            stateTimer = 9.4f;
-            tickT = 0;
-            vel.x = 0;
-            slashArmed = false;
-            fx.AddShake(0.90f);
-            fx.AddHitstop(0.25f);
-            fx.Ring(pos, 20, 420, 800, 12, MoonCol(kind));
-            fx.Text({ pos.x, pos.y - h - 26 }, C(255, 70, 85), 4.0f, "I  WILL  NOT  DIE");
-            PlaySfx(SFX_ROAR, 1.0f, 0.5f);
+            if (newPhase >= 3 && !transformed) {
+                // the transformation: the strongest swordsman refuses the grave
+                transformed = true;
+                state = MState::Desperation;
+                stateTimer = 3.6f;
+                subStep = 0; subT = 1.1f;      // hold the declaration, then erupt
+                tickT = 0;
+                vel.x = 0;
+                slashArmed = slashArmed2 = false;
+                shards.clear();
+                declareT = 2.8f;               // the cinematic banner
+                fx.AddShake(1.0f);
+                fx.AddHitstop(0.35f);
+                fx.Flash(C(18, 3, 32), 0.92f); // the light drains from the arena
+                fx.Ring(pos, 20, 520, 900, 14, MoonCol(kind));
+                PlaySfx(SFX_ROAR, 1.0f, 0.4f);
+            } else if (newPhase == 2 && wasPhase < 2) {
+                // the blade quickens — a cold flourish, no pause in the assault
+                fx.AddShake(0.5f);
+                fx.Flash(C(30, 8, 46), 0.5f);
+                fx.Ring(pos, 16, 360, 760, 10, MoonCol(kind));
+                fx.Text({ pos.x, pos.y - h - 14 }, C(215, 165, 248), 1.6f,
+                        "THE  BLADE  QUICKENS");
+                PlaySfx(SFX_SLASH, 0.9f, 0.5f);
+            }
         } else {
             fx.AddShake(0.55f);
             fx.Ring(pos, 18, 320, 720, 10, MoonCol(kind));
@@ -156,8 +238,12 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, R
         }
     }
 
-    float spd = (phase >= 2 ? MoonSpd(kind) * 1.15f : MoonSpd(kind))
-              * (slowTimer > 0 ? 0.55f : 1.0f);
+    float spd;
+    if (kind == MOON_KOKU)
+        spd = KokuWalk(phase) * (slowTimer > 0 ? 0.5f : 1.0f);
+    else
+        spd = (phase >= 2 ? MoonSpd(kind) * 1.15f : MoonSpd(kind))
+            * (slowTimer > 0 ? 0.55f : 1.0f);
     vulnerable = (state == MState::Recover);
 
     bool huntingAlly = preyAlly && ally && ally->Active();
@@ -197,11 +283,14 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, R
             vel.x = 0;
             stateTimer -= dt;
             facing = prey.x > pos.x ? 1 : -1;
+            if (kind == MOON_KOKU) {
+                fx.MoonWind({ pos.x, pos.y - 14 }, facing, MoonCol(kind), 0.4f);  // gather
+            }
             if (stateTimer <= 0) {
                 state = MState::AtkA;
                 volley = 0;
                 tickT = 0;
-                stateTimer = kind == MOON_DOUMA ? 0.6f : 0.8f;
+                stateTimer = kind == MOON_DOUMA ? 0.6f : 2.4f;   // koku: volley-driven
             }
             break;
         }
@@ -209,27 +298,70 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, R
             stateTimer -= dt;
             tickT -= dt;
             vel.x = 0;
-            int volleys = (kind == MOON_DOUMA)
-                          ? (phase >= 2 ? 3 : 2)
-                          : (phase >= 2 ? 4 : 3);
-            if (tickT <= 0 && volley < volleys) {
-                tickT = 0.22f;
-                volley++;
-                int n = kind == MOON_DOUMA ? (phase >= 2 ? 8 : 6) : 4;
-                Vector2 origin = { pos.x + facing * 26.0f, pos.y - 14 };
-                float baseAng = atan2f(prey.y - origin.y, prey.x - origin.x);
-                for (int i = 0; i < n; i++) {
-                    float a = baseAng + (i - (n - 1) * 0.5f) * (kind == MOON_DOUMA ? 0.12f : 0.2f)
-                              + frnd(-0.04f, 0.04f);
-                    Shard s;
-                    s.pos = origin;
-                    s.vel = { cosf(a) * 500.0f, sinf(a) * 500.0f };
-                    shards.push_back(s);
+            if (kind == MOON_DOUMA) {
+                int volleys = phase >= 2 ? 3 : 2;
+                if (tickT <= 0 && volley < volleys) {
+                    tickT = 0.22f;
+                    volley++;
+                    int n = phase >= 2 ? 8 : 6;
+                    Vector2 origin = { pos.x + facing * 26.0f, pos.y - 14 };
+                    float baseAng = atan2f(prey.y - origin.y, prey.x - origin.x);
+                    for (int i = 0; i < n; i++) {
+                        float a = baseAng + (i - (n - 1) * 0.5f) * 0.12f + frnd(-0.04f, 0.04f);
+                        Shard s;
+                        s.pos = origin;
+                        s.vel = { cosf(a) * 500.0f, sinf(a) * 500.0f };
+                        shards.push_back(s);
+                    }
+                    fx.Sparks(origin, facing > 0 ? 0.0f : 180.0f, 60, 8, MoonCol(kind), 380, 2.5f);
+                    PlaySfx(SFX_SLASH, 0.6f, 1.3f);
                 }
-                fx.Sparks(origin, facing > 0 ? 0.0f : 180.0f, 60, 8, MoonCol(kind), 380, 2.5f);
-                PlaySfx(SFX_SLASH, 0.6f, kind == MOON_DOUMA ? 1.3f : 0.65f);
+                if (stateTimer <= 0) EnterRecover(phase >= 2 ? 0.65f : 0.85f);
+            } else {
+                // Kokushibo — layered moon crescents that fill the field. Fans
+                // arrive at shifting heights and cadence; phase 2+ adds a second
+                // curtain from overhead whose gaps never line up with the first,
+                // and a final delayed volley snaps to where you fled.
+                int volleys = phase >= 3 ? 6 : phase >= 2 ? 5 : 4;
+                if (tickT <= 0 && volley < volleys) {
+                    volley++;
+                    bool punish = (volley == volleys);
+                    // unpredictable cadence: quick bursts, then a held beat
+                    tickT = punish ? 0.44f : (volley % 3 == 0 ? 0.34f : 0.14f);
+                    int n = phase >= 3 ? 9 : phase >= 2 ? 7 : 6;
+                    float speed = 545.0f;
+                    Vector2 origin = { pos.x + facing * 26.0f, pos.y - 14 - frnd(0, 34) };
+                    float baseAng = atan2f(prey.y - origin.y, prey.x - origin.x);
+                    float spread = punish ? 0.13f : 0.30f;   // punish = a focused spear
+                    for (int i = 0; i < n; i++) {
+                        float a = baseAng + (i - (n - 1) * 0.5f) * spread + frnd(-0.03f, 0.03f);
+                        Shard s;
+                        s.pos = origin; s.spin = frnd(0, 360);
+                        s.vel = { cosf(a) * speed, sinf(a) * speed };
+                        if ((int)shards.size() < 520) shards.push_back(s);
+                    }
+                    // phase 2+: an overhead curtain, offset so the seams stagger
+                    if (phase >= 2 && !punish) {
+                        Vector2 o2 = { Clampf(prey.x - facing * 170.0f, 40.0f,
+                                             (float)cfg::SCREEN_W - 40.0f), -20.0f };
+                        int m = phase >= 3 ? 7 : 5;
+                        float base2 = atan2f(prey.y - o2.y, prey.x - o2.x);
+                        for (int i = 0; i < m; i++) {
+                            float a = base2 + (i - (m - 1) * 0.5f) * 0.22f + frnd(-0.03f, 0.03f);
+                            Shard s;
+                            s.pos = o2; s.spin = frnd(0, 360);
+                            s.vel = { cosf(a) * (speed * 0.9f), sinf(a) * (speed * 0.9f) };
+                            if ((int)shards.size() < 520) shards.push_back(s);
+                        }
+                    }
+                    fx.Sparks(origin, facing > 0 ? 0.0f : 180.0f, 60, 10, MoonCol(kind), 420, 2.8f);
+                    fx.MoonWind({ pos.x + facing * 20.0f, pos.y - 14 }, facing, MoonCol(kind), 0.8f);
+                    if (punish) { fx.AddShake(0.25f); fx.Flash(C(24, 6, 40), 0.26f); }
+                    PlaySfx(SFX_SLASH, 0.7f, punish ? 0.5f : 0.72f);
+                }
+                if ((volley >= volleys && tickT <= 0) || stateTimer <= 0)
+                    EnterRecover(phase >= 3 ? 0.5f : phase >= 2 ? 0.6f : 0.72f);
             }
-            if (stateTimer <= 0) EnterRecover(phase >= 2 ? 0.65f : 0.85f);
             break;
         }
         case MState::TeleB: {
@@ -237,9 +369,9 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, R
             stateTimer -= dt;
             facing = prey.x > pos.x ? 1 : -1;
             if (kind == MOON_KOKU) {
-                // show where the moon-blade will sweep
-                slashBand = { facing > 0 ? pos.x + 20 : pos.x - 20 - 560,
-                              cfg::GROUND_Y - 100, 560, 58 };
+                // telegraph the arena-wide chest cut — CROUCH beneath it
+                slashBand = { facing > 0 ? pos.x + 20 : pos.x - 20 - 720,
+                              cfg::GROUND_Y - 100, 720, 58 };
                 slashArmed = true;
             }
             if (stateTimer <= 0) {
@@ -258,18 +390,12 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, R
                     }
                     PlaySfx(SFX_MIST, 0.8f, 0.8f);
                 } else {
-                    // the long slash: an arena-wide cut at chest height. DUCK.
+                    // begin the chained long-slash: beat 0 (chest) is armed
                     state = MState::AtkB;
-                    stateTimer = 0.35f;
-                    slashArmed = false;
-                    cs.Add(slashBand, 24, facing * 560.0f, -240, 0.08f,
-                           Team::Enemy, HitKind::BossAoe, cs.NewId());
-                    fx.SlashArc({ slashBand.x + slashBand.width * 0.5f,
-                                  slashBand.y + slashBand.height * 0.5f },
-                                260, facing > 0 ? -10.0f : 190.0f,
-                                facing > 0 ? 10.0f : 170.0f, MoonCol(kind));
-                    fx.AddShake(0.35f);
-                    PlaySfx(SFX_SLASH, 1.0f, 0.55f);
+                    stateTimer = 3.0f;         // safety cap; beats drive the exit
+                    subStep = 0;
+                    subT = 0.0f;               // TeleB already telegraphed beat 0
+                    slashArmed = true;
                 }
             }
             break;
@@ -311,10 +437,49 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, R
                         }
                     }
                 }
-            }
-            if (stateTimer <= 0) {
-                lotus.clear();
-                EnterRecover(phase >= 2 ? 0.7f : 0.95f);
+                if (stateTimer <= 0) {
+                    lotus.clear();
+                    EnterRecover(phase >= 2 ? 0.7f : 0.95f);
+                }
+            } else {
+                // Kokushibo — the chained moon-slash. Beats alternate height:
+                // even = chest (CROUCH), odd = low sweep (JUMP). Phase 3 = 3 beats.
+                int beats = phase >= 3 ? 3 : phase >= 2 ? 2 : 1;
+                subT -= dt;
+                if (subT <= 0) {
+                    if (slashArmed) {                       // the armed band cuts
+                        bool low = (subStep % 2 == 1);
+                        cs.Add(slashBand, low ? 26.0f : 24.0f, facing * 640.0f,
+                               low ? -560.0f : -260.0f, 0.09f,
+                               Team::Enemy, HitKind::BossAoe, cs.NewId());
+                        fx.SlashArc({ slashBand.x + slashBand.width * 0.5f,
+                                      slashBand.y + slashBand.height * 0.5f },
+                                    300, facing > 0 ? -10.0f : 190.0f,
+                                    facing > 0 ? 10.0f : 170.0f, MoonCol(kind));
+                        fx.MoonWind({ pos.x, slashBand.y + slashBand.height * 0.5f },
+                                    facing, MoonCol(kind), 1.5f);
+                        fx.AddShake(0.42f);
+                        fx.Flash(C(22, 5, 38), 0.34f);
+                        PlaySfx(SFX_SLASH, 1.0f, low ? 0.62f : 0.5f);
+                        slashArmed = false;
+                        subStep++;
+                        subT = 0.16f;
+                    } else if (subStep < beats) {           // arm the next height
+                        bool low = (subStep % 2 == 1);
+                        float bw = 720.0f;
+                        slashBand = low
+                            ? Rectangle{ facing > 0 ? pos.x - 40 : pos.x + 40 - bw,
+                                         cfg::GROUND_Y - 40, bw, 40 }
+                            : Rectangle{ facing > 0 ? pos.x + 20 : pos.x - 20 - bw,
+                                         cfg::GROUND_Y - 100, bw, 58 };
+                        slashArmed = true;
+                        subT = 0.26f;                        // reaction window
+                        PlaySfx(SFX_WHOOSH, 0.5f, 0.7f);
+                    } else {
+                        EnterRecover(phase >= 3 ? 0.55f : phase >= 2 ? 0.66f : 0.85f);
+                    }
+                }
+                if (stateTimer <= 0) EnterRecover(0.6f);     // safety
             }
             break;
         }
@@ -373,44 +538,200 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, R
                 if (stateTimer <= 0) EnterRecover(phase >= 2 ? 0.7f : 0.95f);
             } else {
                 if (stateTimer <= 0) {
-                    Rectangle r = { facing > 0 ? pos.x : pos.x - 130, pos.y - 60, 130, 120 };
-                    cs.Add(r, 26, facing * 640.0f, -400, 0.06f,
-                           Team::Enemy, HitKind::BossAoe, cs.NewId());
-                    float a0 = facing > 0 ? -70.0f : 250.0f;
-                    float a1 = facing > 0 ? 70.0f : 110.0f;
-                    fx.SlashArc(pos, 110, a0, a1, MoonCol(kind));
-                    PlaySfx(SFX_SLASH, 0.9f, 0.6f);
-                    EnterRecover(phase >= 2 ? 0.6f : 0.85f);
+                    // flash cross: he is simply... there, and the cut lands heavy
+                    Rectangle r = { facing > 0 ? pos.x : pos.x - 150, pos.y - 66, 150, 128 };
+                    cs.Add(r, 28, facing * 700.0f, -420, 0.07f,
+                           Team::Enemy, HitKind::BossDash, cs.NewId());
+                    float a0 = facing > 0 ? -80.0f : 260.0f;
+                    float a1 = facing > 0 ?  80.0f : 100.0f;
+                    fx.SlashArc(pos, 130, a0, a1, MoonCol(kind));
+                    fx.MoonWind({ pos.x + facing * 20.0f, pos.y - 8 }, facing, MoonCol(kind), 1.1f);
+                    fx.AddShake(0.32f);
+                    fx.Flash(C(20, 5, 36), 0.3f);
+                    PlaySfx(SFX_SLASH, 1.0f, 0.52f);
+                    EnterRecover(phase >= 3 ? 0.48f : phase >= 2 ? 0.58f : 0.8f);
                 }
             }
             break;
         }
-        case MState::Desperation: {
-            // moon crescents erupt from the earth across the entire field
+        case MState::Stare: {
+            // the silent glare: motionless, six eyes fixed on you. Held a beat
+            // too long to bait a panic dodge — the *vanish* is your only warning.
+            vel.x = 0;
+            stateTimer -= dt;
+            facing = prey.x > pos.x ? 1 : -1;
+            stareGlare = fminf(stareGlare + 4.0f * dt, 1.0f);
+            if (GetRandomValue(0, 3) == 0)
+                fx.Ember({ pos.x + frnd(-30, 30), pos.y + frnd(-44, 18) });
+            if (stateTimer <= 0) {
+                // vanish, and reappear at your side as a barely-there ghost
+                fx.DeathBurst(pos, MoonCol(kind), 1.0f);
+                fx.Ring(pos, 8, 220, 720, 8, MoonCol(kind));
+                float side = (prey.x > cfg::SCREEN_W * 0.5f) ? -1.0f : 1.0f;
+                if (GetRandomValue(0, 2) == 0) side = -side;
+                pos.x = Clampf(prey.x + side * 96.0f, 54.0f, (float)cfg::SCREEN_W - 54.0f);
+                pos.y = cfg::GROUND_Y - h * 0.5f;
+                facing = prey.x > pos.x ? 1 : -1;
+                ghostA = 0.08f;
+                fx.AddHitstop(0.05f);
+                fx.Flash(C(16, 3, 30), 0.5f);
+                PlaySfx(SFX_WHOOSH, 1.0f, 0.5f);
+                state = MState::AtkFlash;
+                stateTimer = 0.15f;               // an incredibly fast draw
+            }
+            break;
+        }
+        case MState::AtkFlash: {
+            vel.x = 0;
+            stateTimer -= dt;
+            ghostA = fminf(ghostA + 8.0f * dt, 1.0f);
+            if (stateTimer <= 0) {
+                Rectangle r = { facing > 0 ? pos.x - 10 : pos.x - 150, pos.y - 70, 160, 138 };
+                cs.Add(r, 34, facing * 760.0f, -440, 0.08f,
+                       Team::Enemy, HitKind::BossDash, cs.NewId());
+                fx.SlashArc(pos, 150, facing > 0 ? -85.0f : 265.0f,
+                            facing > 0 ? 85.0f : 95.0f, MoonCol(kind));
+                fx.MoonWind({ pos.x, pos.y - 8 }, facing, MoonCol(kind), 1.8f);
+                fx.AddShake(0.6f);
+                fx.AddHitstop(0.06f);
+                fx.Flash(C(26, 6, 44), 0.5f);
+                fx.Ring(pos, 10, 180, 620, 8, C(230, 200, 250));
+                PlaySfx(SFX_SLASH, 1.0f, 0.42f);
+                EnterRecover(phase >= 3 ? 0.5f : 0.66f);
+            }
+            break;
+        }
+        case MState::Combo: {
+            // Moon-Dragon: a precise, emotionless close-range sword chain.
+            vel.x = 0;
+            facing = prey.x > pos.x ? 1 : -1;
+            subT -= dt;
+            int hits = phase >= 3 ? 4 : 3;
+            if (subT <= 0 && comboHit < hits) {
+                bool last = (comboHit == hits - 1);
+                Rectangle r = { facing > 0 ? pos.x : pos.x - 122, pos.y - 54, 122, 108 };
+                cs.Add(r, last ? 20.0f : 12.0f, facing * (last ? 620.0f : 240.0f),
+                       last ? -360.0f : -120.0f, 0.07f, Team::Enemy,
+                       last ? HitKind::BossDash : HitKind::BossAoe, cs.NewId());
+                float a0 = facing > 0 ? -60.0f : 240.0f;
+                float a1 = facing > 0 ?  60.0f : 120.0f;
+                fx.SlashArc({ pos.x + facing * 30.0f, pos.y - 6 }, 90.0f + comboHit * 8,
+                            a0, a1, MoonCol(kind));
+                fx.MoonWind({ pos.x + facing * 30.0f, pos.y - 6 }, facing, MoonCol(kind), 0.7f);
+                if (last) { fx.AddShake(0.4f); fx.Flash(C(22, 5, 38), 0.3f); }
+                PlaySfx(SFX_SLASH, 0.85f, 0.6f + comboHit * 0.05f);
+                comboHit++;
+                subT = last ? 0.2f : 0.14f;
+            }
+            if (comboHit >= hits && subT <= 0) {
+                comboHit = 0;
+                EnterRecover(phase >= 3 ? 0.5f : 0.68f);
+            }
+            break;
+        }
+        case MState::Storm: {
+            // Phase 3 — Tenman Crescent Moons: the sky and earth answer him.
+            // A repeatable, shorter cousin of the transformation.
             stateTimer -= dt;
             vel.x = 0;
+            if (subStep == 0) {                    // one-shot gather flourish
+                subStep = 1;
+                fx.AddShake(0.5f);
+                fx.Flash(C(24, 6, 42), 0.45f);
+                fx.Ring(pos, 14, 460, 860, 12, MoonCol(kind));
+                PlaySfx(SFX_ROAR, 0.8f, 0.5f);
+            }
             tickT -= dt;
             if (tickT <= 0) {
-                tickT = 0.05f;
-                for (int i = 0; i < 5; i++) {
+                tickT = 0.08f;
+                for (int i = 0; i < 4; i++) {       // rain from above
+                    if ((int)shards.size() >= 520) break;
                     Shard s;
-                    float sx = frnd(30.0f, cfg::SCREEN_W - 30.0f);
-                    s.pos = { sx, cfg::GROUND_Y - 10.0f };
-                    float a = frnd(-155.0f, -25.0f) * DEG2RAD;
-                    float sp = frnd(300.0f, 640.0f);
+                    float sx = frnd(20.0f, cfg::SCREEN_W - 20.0f);
+                    s.pos = { sx, -20.0f };
+                    float a = frnd(60.0f, 120.0f) * DEG2RAD;
+                    float sp = frnd(360.0f, 560.0f);
+                    s.vel = { cosf(a) * sp, sinf(a) * sp };
+                    s.spin = frnd(0, 360);
+                    shards.push_back(s);
+                }
+                for (int i = 0; i < 3; i++) {       // erupt from the earth
+                    if ((int)shards.size() >= 520) break;
+                    Shard s;
+                    float sx = frnd(20.0f, cfg::SCREEN_W - 20.0f);
+                    s.pos = { sx, cfg::GROUND_Y - 8.0f };
+                    float a = frnd(-150.0f, -30.0f) * DEG2RAD;
+                    float sp = frnd(340.0f, 600.0f);
                     s.vel = { cosf(a) * sp, sinf(a) * sp };
                     s.spin = frnd(0, 360);
                     shards.push_back(s);
                     if (GetRandomValue(0, 2) == 0)
-                        fx.Sparks({ sx, cfg::GROUND_Y - 4 }, -90, 60, 3,
-                                  MoonCol(kind), 320, 2.5f);
+                        fx.Sparks({ sx, cfg::GROUND_Y - 4 }, -90, 50, 3, MoonCol(kind), 300, 2.4f);
                 }
             }
-            if (fmodf(stateTimer, 0.5f) < 0.02f) {
-                fx.AddShake(0.3f);
-                PlaySfx(SFX_SLASH, 0.5f, 0.5f);
+            if (fmodf(stateTimer, 0.4f) < 0.02f) {
+                fx.AddShake(0.28f);
+                fx.Flash(C(20, 5, 36), 0.16f);
+                PlaySfx(SFX_SLASH, 0.5f, 0.55f);
             }
-            if (stateTimer <= 0) EnterRecover(1.2f);   // spent, for a breath
+            if (stateTimer <= 0) EnterRecover(0.85f);
+            break;
+        }
+        case MState::Desperation: {
+            // "I WILL NOT DIE" — the transformation. A held declaration, then an
+            // enormous eruption of moon crescents, then the arena drowns in them.
+            stateTimer -= dt;
+            vel.x = 0;
+            subT -= dt;
+            if (subStep == 0) {
+                if (GetRandomValue(0, 1) == 0)
+                    fx.Ember({ pos.x + frnd(-42, 42), pos.y + frnd(-72, 10) });
+                if (fmodf(stateTimer, 0.16f) < 0.02f) fx.AddShake(0.28f);
+                if (subT <= 0) {                    // the eruption
+                    subStep = 1;
+                    for (int i = 0; i < 150; i++) {
+                        if ((int)shards.size() >= 520) break;
+                        float a = frnd(0.0f, 360.0f) * DEG2RAD;
+                        float sp = frnd(280.0f, 720.0f);
+                        Shard s;
+                        s.pos = { pos.x, pos.y - 10 };
+                        s.vel = { cosf(a) * sp, sinf(a) * sp };
+                        s.spin = frnd(0, 360);
+                        shards.push_back(s);
+                    }
+                    fx.AddShake(1.0f);
+                    fx.AddHitstop(0.28f);
+                    fx.Flash(C(30, 6, 50), 0.88f);
+                    fx.Ring(pos, 16, 640, 1000, 18, MoonCol(kind));
+                    fx.Ring(pos, 10, 440, 780, 10, C(235, 205, 255));
+                    fx.DeathBurst(pos, MoonCol(kind), 2.4f);
+                    PlaySfx(SFX_EXPLO, 1.0f, 0.6f);
+                    PlaySfx(SFX_ROAR, 1.0f, 0.45f);
+                }
+            } else {
+                tickT -= dt;
+                if (tickT <= 0) {
+                    tickT = 0.05f;
+                    for (int i = 0; i < 5; i++) {
+                        if ((int)shards.size() >= 520) break;
+                        Shard s;
+                        float sx = frnd(20.0f, cfg::SCREEN_W - 20.0f);
+                        bool fromSky = GetRandomValue(0, 1) == 0;
+                        s.pos = { sx, fromSky ? -18.0f : cfg::GROUND_Y - 10.0f };
+                        float a = fromSky ? frnd(60.0f, 120.0f) * DEG2RAD
+                                          : frnd(-150.0f, -30.0f) * DEG2RAD;
+                        float sp = frnd(320.0f, 640.0f);
+                        s.vel = { cosf(a) * sp, sinf(a) * sp };
+                        s.spin = frnd(0, 360);
+                        shards.push_back(s);
+                    }
+                }
+                if (fmodf(stateTimer, 0.4f) < 0.02f) {
+                    fx.AddShake(0.3f);
+                    PlaySfx(SFX_SLASH, 0.5f, 0.5f);
+                }
+            }
+            if (stateTimer <= 0) EnterRecover(1.0f);
             break;
         }
         case MState::Recover: {
@@ -418,7 +739,11 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, R
             vel.x *= 1.0f - Clampf(5.0f * dt, 0, 1);
             if (stateTimer <= 0) {
                 state = MState::Stalk;
-                decideTimer = frnd(0.6f, 1.1f) / (phase >= 2 ? 1.25f : 1.0f);
+                if (kind == MOON_KOKU)
+                    decideTimer = frnd(0.32f, 0.66f)     // relentless: barely a breath
+                                / (phase >= 3 ? 1.5f : phase >= 2 ? 1.25f : 1.0f);
+                else
+                    decideTimer = frnd(0.6f, 1.1f) / (phase >= 2 ? 1.25f : 1.0f);
             }
             break;
         }
@@ -450,7 +775,11 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, R
         s.pos.x += s.vel.x * dt;
         s.pos.y += s.vel.y * dt;
         s.spin += 640.0f * dt;
-        float shardDmg = state == MState::Desperation ? 43.0f : 23.0f;
+        float shardDmg;
+        if (kind == MOON_DOUMA) shardDmg = 23.0f;
+        else shardDmg = (state == MState::Desperation) ? 24.0f
+                      : (state == MState::Storm)        ? 22.0f
+                      : KokuCrescentDmg(phase);
         if (CheckCollisionCircleRec(s.pos, 12, player.Rect())) {
             if (player.TakeDamage(shardDmg, (s.vel.x > 0 ? 1 : -1) * 320.0f, fx)) {
                 if (kind == MOON_DOUMA) player.chillT = fmaxf(player.chillT, 1.6f);
@@ -546,6 +875,8 @@ void UpperMoon::TakeDamage(float dmg, float kbx, HitKind kindHit, Effects& fx) {
         shards.clear();
         lotus.clear();
         slashArmed = false;
+        declareT = 0;
+        if (kind == MOON_KOKU) SetBossDrone(0);   // the dread lifts as he falls
         fx.AddShake(0.7f);
         fx.AddHitstop(0.4f);
     }
@@ -553,9 +884,12 @@ void UpperMoon::TakeDamage(float dmg, float kbx, HitKind kindHit, Effects& fx) {
 
 bool UpperMoon::ForceOpening(Effects& fx) {
     if (!active || openingCd > 0) return false;
+    // an opening can be forced while he winds up or stares you down — but not
+    // mid-combo, mid-flash, mid-storm, or through the transformation.
     bool interruptible =
         state == MState::Stalk || state == MState::TeleA ||
-        state == MState::TeleB || state == MState::TeleC;
+        state == MState::TeleB || state == MState::TeleC ||
+        state == MState::Stare;
     if (!interruptible) return false;
     openingCd = 9.0f;
     slashArmed = false;
@@ -593,7 +927,9 @@ int UpperMoon::ShardsNear(Vector2 c, float r) const {
 
 bool UpperMoon::Menacing(Vector2 a, Vector2 b) const {
     if (!Alive()) return false;
-    if (state == MState::AtkA || state == MState::AtkB || state == MState::AtkC)
+    if (state == MState::AtkA || state == MState::AtkB || state == MState::AtkC ||
+        state == MState::AtkFlash || state == MState::Combo ||
+        state == MState::Storm || state == MState::Desperation)
         return true;
     return ShardsNear(a, 260) >= 2 || ShardsNear(b, 220) >= 2;
 }
@@ -605,6 +941,27 @@ void UpperMoon::Draw() const {
     float gt = (float)GetTime();
     Color mc = MoonCol(kind);
     float bodyA = kind == MOON_KOKU ? ghostA : 1.0f;
+
+    // Kokushibo carries his own gravity — an ever-present pall of moonlight and
+    // dread, deepening with each phase. It hangs on him even as he merely walks.
+    if (kind == MOON_KOKU) {
+        float ph = phase >= 3 ? 1.0f : phase >= 2 ? 0.7f : 0.45f;
+        float breathe = 0.5f + 0.5f * sinf(auraPulse * 2.2f);
+        DrawEllipse((int)pos.x, (int)(cfg::GROUND_Y + 4), (int)(60 + 20 * ph), 14,
+                    Fade(C(18, 4, 30), 0.5f * bodyA));
+        float glowR = 72 + 34 * ph + 8 * breathe;
+        DrawCircleGradient((int)pos.x, (int)(pos.y - 6), glowR,
+                           Fade(mc, (0.09f + 0.11f * ph) * (0.6f + 0.4f * breathe) * bodyA), BLANK);
+        // slow crescent motes orbiting him — moonlight that never settles
+        int motes = 3 + (int)(ph * 4);
+        for (int i = 0; i < motes; i++) {
+            float a = auraPulse * (0.6f + 0.14f * i) + i * (6.2831853f / motes);
+            float rr = 44 + 16 * sinf(auraPulse * 1.3f + i);
+            Vector2 mp = { pos.x + cosf(a) * rr, pos.y - 10 + sinf(a) * rr * 0.5f };
+            float ma = atan2f(-sinf(a), -cosf(a)) * RAD2DEG;
+            DrawRing(mp, 4, 8, ma - 70, ma + 70, 10, Fade(mc, (0.35f + 0.3f * ph) * bodyA));
+        }
+    }
 
     // lotus telegraphs bloom on the ground
     for (const auto& lz : lotus) {
@@ -621,19 +978,26 @@ void UpperMoon::Draw() const {
         }
     }
 
-    // the long-slash warning band
+    // the long-slash warning band — the seam the moon-blade will pass through
     if (kind == MOON_KOKU && slashArmed) {
-        float pulse = 0.16f + 0.12f * sinf(gt * 26.0f);
+        float pulse = 0.16f + 0.14f * sinf(gt * 26.0f);
         DrawRectangleRec(slashBand, Fade(mc, pulse));
         DrawRectangle((int)slashBand.x, (int)(slashBand.y + slashBand.height * 0.5f - 2),
-                      (int)slashBand.width, 4, Fade(C(255, 240, 255), pulse + 0.15f));
+                      (int)slashBand.width, 4, Fade(C(255, 240, 255), pulse + 0.2f));
+        DrawRectangleLinesEx(slashBand, 1.5f, Fade(mc, pulse + 0.1f));
+    }
+    // the flash-slash gathers for an instant before it lands
+    if (kind == MOON_KOKU && state == MState::AtkFlash) {
+        Rectangle r = { facing > 0 ? pos.x - 10 : pos.x - 150, pos.y - 70, 160, 138 };
+        DrawRectangleRec(r, Fade(mc, 0.12f + 0.12f * sinf(gt * 40.0f)));
     }
 
     // shadow
     DrawEllipse((int)pos.x, (int)(cfg::GROUND_Y + 6), 24, 7, Fade(BLACK, 0.4f * bodyA));
 
     float lean = 0;
-    float hover = kind == MOON_DOUMA ? sinf(gt * 3.0f) * 4.0f : 0.0f;
+    float hover = kind == MOON_DOUMA ? sinf(gt * 3.0f) * 4.0f
+                : (state == MState::Stalk ? sinf(walkBob * 7.0f) * 1.6f : 0.0f); // slow stride
     float bx = pos.x + lean, by = pos.y - hover;
     bool telegraphing = (state == MState::TeleA || state == MState::TeleB ||
                          state == MState::TeleC);
@@ -691,11 +1055,18 @@ void UpperMoon::Draw() const {
     } else {
         // long dark mane
         DrawRectangle((int)(headC.x - facing * 13), (int)(headC.y - 2), 5, 26, Fade(hair, bodyA));
-        // six eyes: three crimson pairs
+        // six eyes: three crimson pairs, ever-watchful — they burn while he
+        // stares you down, and smoulder even at rest
+        float eyeGlow = 0.35f + 0.65f * stareGlare + (phase >= 3 ? 0.2f : 0.0f);
+        float eyePulse = 0.7f + 0.3f * sinf(gt * 6.0f);
         for (int i = 0; i < 3; i++) {
             float ey = headC.y - 3 + i * 4.0f;
-            DrawCircleV({ headC.x + facing * 5.0f, ey }, 1.6f, Fade(C(235, 60, 60), bodyA));
-            DrawCircleV({ headC.x + facing * 1.0f, ey }, 1.6f, Fade(C(235, 60, 60), bodyA));
+            Vector2 e1 = { headC.x + facing * 5.0f, ey };
+            Vector2 e2 = { headC.x + facing * 1.0f, ey };
+            DrawCircleV(e1, 3.6f, Fade(C(255, 40, 40), 0.4f * eyeGlow * eyePulse * bodyA));
+            DrawCircleV(e2, 3.6f, Fade(C(255, 40, 40), 0.4f * eyeGlow * eyePulse * bodyA));
+            DrawCircleV(e1, 1.7f, Fade(C(255, 95, 95), bodyA));
+            DrawCircleV(e2, 1.7f, Fade(C(255, 95, 95), bodyA));
         }
         // the flesh katana
         Vector2 hand = { bx + facing * 15.0f, by - 4 };
@@ -723,9 +1094,11 @@ void UpperMoon::Draw() const {
             DrawPoly(s.pos, 4, 9, s.spin, Fade(C(200, 240, 255), 0.9f));
             DrawPoly(s.pos, 4, 5, s.spin, C(240, 252, 255));
         } else {
+            // glowing purple moon crescent, with a soft halo
             float angDeg = atan2f(s.vel.y, s.vel.x) * RAD2DEG;
+            DrawRing(s.pos, 6, 16, angDeg - 106, angDeg + 106, 18, Fade(mc, 0.32f));
             DrawRing(s.pos, 7, 13, angDeg - 100, angDeg + 100, 16, mc);
-            DrawRing(s.pos, 9, 11, angDeg - 80, angDeg + 80, 12, C(230, 200, 250));
+            DrawRing(s.pos, 9, 11, angDeg - 80, angDeg + 80, 12, C(235, 205, 255));
         }
     }
 }
