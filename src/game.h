@@ -13,6 +13,7 @@
 #include "effects.h"
 #include "styles.h"
 #include "companion.h"
+#include "shinobu.h"
 #include <vector>
 
 enum class GState { Title, Playing, Upgrade, BossIntro, Paused, Victory, GameOver };
@@ -59,6 +60,7 @@ private:
     std::vector<Pickup> pickups;
     Progression prog;
     Giyu giyu;
+    Shinobu shinobu;
 
     int   selRow = 0, selCol = 0;   // upgrade menu cursor
     // the night's gauntlet: waves -> Akaza -> waves -> Douma -> waves

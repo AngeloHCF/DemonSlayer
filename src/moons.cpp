@@ -1,6 +1,7 @@
 #include "moons.h"
 #include "player.h"
 #include "companion.h"
+#include "shinobu.h"
 #include "effects.h"
 #include "config.h"
 #include "audio.h"
@@ -31,6 +32,7 @@ void UpperMoon::Reset() {
     hitFlash = 0;
     ghostA = 1.0f;
     preyAlly = false;
+    preyShinobu = false;
     shards.clear();
     lotus.clear();
     slashArmed = false;
@@ -55,9 +57,23 @@ void UpperMoon::EnterRecover(float t) {
     stateTimer = t;
 }
 
-void UpperMoon::ChooseAttack(const Player& player, const Giyu* ally) {
-    preyAlly = ally && ally->Active() && GetRandomValue(0, 99) < 40;
-    Vector2 prey = preyAlly ? ally->pos : player.pos;
+void UpperMoon::ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu) {
+    preyAlly = false;
+    preyShinobu = false;
+    bool gActive = ally && ally->Active();
+    bool sActive = shinobu && shinobu->Active();
+    if ((gActive || sActive) && GetRandomValue(0, 99) < 40) {
+        if (gActive && sActive) {
+            float dg = fabsf(ally->pos.x - pos.x);
+            float ds = fabsf(shinobu->pos.x - pos.x);
+            preyAlly = dg <= ds;
+            preyShinobu = !preyAlly;
+        } else {
+            preyAlly = gActive;
+            preyShinobu = sActive;
+        }
+    }
+    Vector2 prey = preyAlly ? ally->pos : (preyShinobu ? shinobu->pos : player.pos);
     float dist = fabsf(prey.x - pos.x);
     int roll = GetRandomValue(0, 99);
 
@@ -85,7 +101,8 @@ void UpperMoon::ChooseAttack(const Player& player, const Giyu* ally) {
     if (phase >= 2) stateTimer *= 0.75f;
 }
 
-void UpperMoon::Update(float dt, Player& player, Giyu* ally, CombatSystem& cs, Effects& fx) {
+void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
+                       CombatSystem& cs, Effects& fx) {
     if (!active || state == MState::Dead) return;
 
     hitFlash  = fmaxf(hitFlash - dt, 0);
@@ -134,7 +151,8 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, CombatSystem& cs, E
     vulnerable = (state == MState::Recover);
 
     bool huntingAlly = preyAlly && ally && ally->Active();
-    Vector2 prey = huntingAlly ? ally->pos : player.pos;
+    bool huntingShinobu = preyShinobu && shinobu && shinobu->Active();
+    Vector2 prey = huntingAlly ? ally->pos : (huntingShinobu ? shinobu->pos : player.pos);
 
     switch (state) {
         case MState::Intro: {
@@ -158,7 +176,7 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, CombatSystem& cs, E
                 else
                     vel.x *= 1.0f - Clampf(6.0f * dt, 0, 1);
                 decideTimer -= dt;
-                if (decideTimer <= 0) ChooseAttack(player, ally);
+                if (decideTimer <= 0) ChooseAttack(player, ally, shinobu);
             }
             break;
         }
@@ -268,6 +286,11 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, CombatSystem& cs, E
                             float dir = ally->pos.x >= lz.pos.x ? 1.0f : -1.0f;
                             ally->TakeDamage(20, dir * 480.0f, HitKind::BossAoe, fx);
                         }
+                        if (shinobu && shinobu->Active() &&
+                            Dist(shinobu->pos, { lz.pos.x, lz.pos.y - 20 }) < 90) {
+                            float dir = shinobu->pos.x >= lz.pos.x ? 1.0f : -1.0f;
+                            shinobu->TakeDamage(20, dir * 480.0f, HitKind::BossAoe, fx);
+                        }
                     }
                 }
             }
@@ -324,6 +347,8 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, CombatSystem& cs, E
                     }
                     if (ally && ally->Active() && CheckCollisionRecs(cone, ally->Rect()))
                         ally->TakeDamage(6, facing * 140.0f, HitKind::BossProjectile, fx);
+                    if (shinobu && shinobu->Active() && CheckCollisionRecs(cone, shinobu->Rect()))
+                        shinobu->TakeDamage(6, facing * 140.0f, HitKind::BossProjectile, fx);
                 }
                 if (stateTimer <= 0) EnterRecover(phase >= 2 ? 0.7f : 0.95f);
             } else {
@@ -418,6 +443,12 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, CombatSystem& cs, E
                              HitKind::BossProjectile, fx);
             s.alive = false;
         }
+        if (s.alive && shinobu && shinobu->Active() &&
+            CheckCollisionCircleRec(s.pos, 12, shinobu->Rect())) {
+            shinobu->TakeDamage(shardDmg, (s.vel.x > 0 ? 1 : -1) * 320.0f,
+                                HitKind::BossProjectile, fx);
+            s.alive = false;
+        }
         if (s.pos.x < -60 || s.pos.x > cfg::SCREEN_W + 60 ||
             s.pos.y < -60 || s.pos.y > cfg::SCREEN_H + 60)
             s.alive = false;
@@ -443,6 +474,7 @@ void UpperMoon::TakeDamage(float dmg, float kbx, HitKind kindHit, Effects& fx) {
 
     if (dmg <= 0) {
         if (kindHit == HitKind::Water) slowTimer = fmaxf(slowTimer, 0.8f);
+        if (kindHit == HitKind::Shinobu) poisonT = fmaxf(poisonT, 2.5f);
         return;
     }
 
@@ -451,6 +483,10 @@ void UpperMoon::TakeDamage(float dmg, float kbx, HitKind kindHit, Effects& fx) {
     if (kindHit == HitKind::Water) slowTimer = 1.4f;
     if (kindHit == HitKind::Serpent) poisonT = 3.0f;
     if (kindHit == HitKind::Giyu) mult *= 0.3f;   // Hashira alone cannot fell an Upper Moon
+    if (kindHit == HitKind::Shinobu) {
+        mult *= 0.25f;
+        poisonT = fmaxf(poisonT, 4.5f);
+    }
     if (kindHit == HitKind::Stone && guardBroken <= 0) {
         guardBroken = 4.0f;
         fx.Text({ pos.x, pos.y - h * 0.5f - 34 }, C(210, 200, 185), 1.2f, "GUARD BROKEN");
@@ -468,6 +504,7 @@ void UpperMoon::TakeDamage(float dmg, float kbx, HitKind kindHit, Effects& fx) {
     if (kindHit == HitKind::Serpent) tcol = C(140, 220, 90);
     if (kindHit == HitKind::Wind)    tcol = C(215, 245, 230);
     if (kindHit == HitKind::Giyu)    tcol = C(120, 190, 255);
+    if (kindHit == HitKind::Shinobu) tcol = C(190, 150, 255);
     fx.Text({ pos.x, pos.y - h * 0.5f - 16 }, tcol,
             (vulnerable || guardBroken > 0) ? 1.25f : 0.95f, "%.0f", dealt);
     fx.HitSparks({ pos.x, pos.y - 10 }, kbx >= 0 ? 1 : -1, tcol);

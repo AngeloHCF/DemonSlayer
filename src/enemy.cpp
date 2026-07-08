@@ -119,6 +119,7 @@ void Enemy::TakeDamage(float damage, float kbx, HitKind kind, Effects& fx) {
 
     if (damage <= 0) {                      // status-only field (mist cloud)
         if (kind == HitKind::Water) slowTimer = fmaxf(slowTimer, 1.0f);
+        if (kind == HitKind::Shinobu) poisonT = fmaxf(poisonT, 2.5f);
         return;
     }
 
@@ -134,6 +135,7 @@ void Enemy::TakeDamage(float damage, float kbx, HitKind kind, Effects& fx) {
     if (kind == HitKind::Serpent) { hitCol = C(140, 220, 90); poisonT = 3.0f; }
     if (kind == HitKind::Wind)    { hitCol = C(215, 245, 230); }
     if (kind == HitKind::Giyu)    { hitCol = C(120, 190, 255); slowTimer = fmaxf(slowTimer, 1.2f); }
+    if (kind == HitKind::Shinobu) { hitCol = C(190, 150, 255); poisonT = fmaxf(poisonT, 4.0f); }
 
     if (type != EType::Brute || armorBreak > 0) {
         // light demons get interrupted and knocked back (stone breaks brute armor)

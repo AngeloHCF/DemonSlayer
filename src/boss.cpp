@@ -1,6 +1,7 @@
 #include "boss.h"
 #include "player.h"
 #include "companion.h"
+#include "shinobu.h"
 #include "effects.h"
 #include "config.h"
 #include "audio.h"
@@ -26,6 +27,7 @@ void Boss::Reset() {
     slowTimer = 0; openingCd = 0; poisonT = 0; poisonTick = 0;
     hitFlash = 0; auraTimer = 0;
     preyAlly = false;
+    preyShinobu = false;
     despBlasted = false;
     crescents.clear();
     ringsAtk.clear();
@@ -49,10 +51,24 @@ void Boss::EnterRecover(float t) {
     stateTimer = t;
 }
 
-void Boss::ChooseAttack(const Player& player, const Giyu* ally) {
-    // sometimes the Demon King turns his attention to the Hashira
-    preyAlly = ally && ally->Active() && GetRandomValue(0, 99) < 35;
-    Vector2 prey = preyAlly ? ally->pos : player.pos;
+void Boss::ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu) {
+    // sometimes the Demon King turns his attention to a Hashira
+    preyAlly = false;
+    preyShinobu = false;
+    bool gActive = ally && ally->Active();
+    bool sActive = shinobu && shinobu->Active();
+    if ((gActive || sActive) && GetRandomValue(0, 99) < 35) {
+        if (gActive && sActive) {
+            float dg = fabsf(ally->pos.x - pos.x);
+            float ds = fabsf(shinobu->pos.x - pos.x);
+            preyAlly = dg <= ds;
+            preyShinobu = !preyAlly;
+        } else {
+            preyAlly = gActive;
+            preyShinobu = sActive;
+        }
+    }
+    Vector2 prey = preyAlly ? ally->pos : (preyShinobu ? shinobu->pos : player.pos);
 
     float dist = fabsf(prey.x - pos.x);
     int roll = GetRandomValue(0, 99);
@@ -105,7 +121,7 @@ void Boss::ChooseAttack(const Player& player, const Giyu* ally) {
     if (phase >= 4) stateTimer *= 0.75f;
 }
 
-void Boss::Update(float dt, Player& player, Giyu* ally, CombatSystem& cs,
+void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, CombatSystem& cs,
                   Effects& fx, int& summonRequest) {
     summonRequest = 0;
     if (!active || state == BState::Dead) return;
@@ -171,7 +187,8 @@ void Boss::Update(float dt, Player& player, Giyu* ally, CombatSystem& cs,
 
     // whom is he hunting right now?
     bool huntingAlly = preyAlly && ally && ally->Active();
-    Vector2 prey = huntingAlly ? ally->pos : player.pos;
+    bool huntingShinobu = preyShinobu && shinobu && shinobu->Active();
+    Vector2 prey = huntingAlly ? ally->pos : (huntingShinobu ? shinobu->pos : player.pos);
 
     switch (state) {
         case BState::Intro: {
@@ -190,7 +207,7 @@ void Boss::Update(float dt, Player& player, Giyu* ally, CombatSystem& cs,
                 if (fabsf(dx) > 150) vel.x = facing * spd;
                 else vel.x *= 1.0f - Clampf(6.0f * dt, 0, 1);
                 decideTimer -= dt;
-                if (decideTimer <= 0) ChooseAttack(player, ally);
+                if (decideTimer <= 0) ChooseAttack(player, ally, shinobu);
             }
             break;
         }
@@ -323,6 +340,14 @@ void Boss::Update(float dt, Player& player, Giyu* ally, CombatSystem& cs,
                             ally->TakeDamage(40, dir * 550.0f, HitKind::BossAoe, fx);
                         }
                     }
+                    if (!rg.hitDone && shinobu && shinobu->Active()) {
+                        float dS = Dist(shinobu->pos, rg.center);
+                        if (fabsf(dS - rg.r) < 30 && shinobu->pos.y > cfg::GROUND_Y - 130) {
+                            rg.hitDone = true;
+                            float dir = shinobu->pos.x >= rg.center.x ? 1.0f : -1.0f;
+                            shinobu->TakeDamage(40, dir * 550.0f, HitKind::BossAoe, fx);
+                        }
+                    }
                 }
             }
             if (stateTimer <= 0) {
@@ -413,6 +438,12 @@ void Boss::Update(float dt, Player& player, Giyu* ally, CombatSystem& cs,
                             float dir = ally->pos.x >= rg.center.x ? 1.0f : -1.0f;
                             ally->TakeDamage(50, dir * 820.0f, HitKind::BossAoe, fx);
                         }
+                        if (!rg.hitDone && shinobu && shinobu->Active() &&
+                            fabsf(Dist(shinobu->pos, rg.center) - rg.r) < 34) {
+                            rg.hitDone = true;
+                            float dir = shinobu->pos.x >= rg.center.x ? 1.0f : -1.0f;
+                            shinobu->TakeDamage(50, dir * 820.0f, HitKind::BossAoe, fx);
+                        }
                     }
                 }
             }
@@ -470,6 +501,12 @@ void Boss::Update(float dt, Player& player, Giyu* ally, CombatSystem& cs,
                              HitKind::BossProjectile, fx);
             c.alive = false;
         }
+        if (c.alive && shinobu && shinobu->Active() &&
+            CheckCollisionCircleRec(c.pos, 13, shinobu->Rect())) {
+            shinobu->TakeDamage(24, (c.vel.x > 0 ? 1 : -1) * 380.0f,
+                                HitKind::BossProjectile, fx);
+            c.alive = false;
+        }
         if (c.pos.x < -60 || c.pos.x > cfg::SCREEN_W + 60 ||
             c.pos.y < -60 || c.pos.y > cfg::SCREEN_H + 60)
             c.alive = false;
@@ -497,6 +534,7 @@ void Boss::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
 
     if (dmg <= 0) {                          // status-only field (mist cloud)
         if (kind == HitKind::Water) slowTimer = fmaxf(slowTimer, 0.8f);
+        if (kind == HitKind::Shinobu) poisonT = fmaxf(poisonT, 2.5f);
         return;
     }
 
@@ -508,6 +546,10 @@ void Boss::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
         // a Hashira alone cannot fell the Demon King
         mult *= 0.22f;
         slowTimer = fmaxf(slowTimer, 0.6f);
+    }
+    if (kind == HitKind::Shinobu) {
+        mult *= 0.18f;
+        poisonT = fmaxf(poisonT, 4.5f);
     }
     if (kind == HitKind::Stone && guardBroken <= 0) {
         guardBroken = 4.0f;
@@ -526,6 +568,7 @@ void Boss::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
     if (kind == HitKind::Serpent) tcol = C(140, 220, 90);
     if (kind == HitKind::Wind)    tcol = C(215, 245, 230);
     if (kind == HitKind::Giyu)    tcol = C(120, 190, 255);
+    if (kind == HitKind::Shinobu) tcol = C(190, 150, 255);
     fx.Text({ pos.x, pos.y - h * 0.5f - 16 }, tcol,
             (vulnerable || guardBroken > 0) ? 1.25f : 0.95f, "%.0f", dealt);
     fx.HitSparks({ pos.x, pos.y - 10 }, kbx >= 0 ? 1 : -1, tcol);

@@ -17,6 +17,7 @@
 class Effects;
 class Player;
 class Giyu;
+class Shinobu;
 
 enum MoonKind { MOON_DOUMA = 0, MOON_KOKU = 1 };
 
@@ -48,7 +49,8 @@ public:
 
     void Reset();
     void Activate(Vector2 p);
-    void Update(float dt, Player& player, Giyu* ally, CombatSystem& cs, Effects& fx);
+    void Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
+                CombatSystem& cs, Effects& fx);
     void Draw() const;
     Rectangle Rect() const;
     void TakeDamage(float dmg, float kbx, HitKind kindHit, Effects& fx);
@@ -75,7 +77,7 @@ public:
     HitMemory hitMem;
 
 private:
-    void ChooseAttack(const Player& player, const Giyu* ally);
+    void ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu);
     void EnterRecover(float t);
 
     float stateTimer = 0;
@@ -88,6 +90,7 @@ private:
     float hitFlash = 0;
     float ghostA = 1.0f;           // kokushibo flash-step fade
     bool  preyAlly = false;
+    bool  preyShinobu = false;
     std::vector<Shard> shards;
     std::vector<Lotus> lotus;
     Rectangle slashBand{};         // koku long-slash telegraph

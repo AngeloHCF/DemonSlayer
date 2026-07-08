@@ -47,6 +47,8 @@ void Game::Init() {
     player.Reset({ cfg::SCREEN_W * 0.5f, cfg::GROUND_Y - 60 });
     giyu.mastery.Load();      // his experience endures across sessions
     giyu.ResetRun();
+    shinobu.mastery.Load();
+    shinobu.ResetRun();
 }
 
 UpperMoon* Game::ActiveMoon() {
@@ -92,6 +94,7 @@ void Game::StartRun() {
     combat.Clear();
     fx.Reset();
     giyu.ResetRun();
+    shinobu.ResetRun();
     kills = 0;
     elapsed = 0;
     deathT = 0;
@@ -177,6 +180,10 @@ void Game::ResolveCombat() {
                     giyu.mastery.xp++;                                 // his blade remembers
                     giyu.mastery.kills++;
                 }
+                if (!e.alive && hb.kind == HitKind::Shinobu && shinobu.mastery.xp < 999) {
+                    shinobu.mastery.xp++;
+                    shinobu.mastery.kills++;
+                }
             }
             if (boss.Alive() && !boss.hitMem.Seen(hb.attackId) &&
                 CheckCollisionRecs(hb.rect, boss.Rect())) {
@@ -185,6 +192,9 @@ void Game::ResolveCombat() {
                 if (hb.kind == HitKind::Giyu && hb.damage >= 15 &&
                     boss.ForceOpening(fx))
                     giyu.mastery.xp += 3;                              // openings teach him
+                if (hb.kind == HitKind::Shinobu && hb.damage >= 10 &&
+                    boss.ForceOpening(fx))
+                    shinobu.mastery.xp += 3;
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.kind == HitKind::Fire ? 0.04f : 0.015f);
                     PlaySfx(SFX_HIT, 0.6f, 0.85f);
@@ -201,6 +211,9 @@ void Game::ResolveCombat() {
                 if (hb.kind == HitKind::Giyu && hb.damage >= 15 &&
                     akaza.ForceOpening(fx))
                     giyu.mastery.xp += 3;
+                if (hb.kind == HitKind::Shinobu && hb.damage >= 10 &&
+                    akaza.ForceOpening(fx))
+                    shinobu.mastery.xp += 3;
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.kind == HitKind::Fire ? 0.04f : 0.015f);
                     PlaySfx(SFX_HIT, 0.6f, 1.0f);
@@ -219,6 +232,9 @@ void Game::ResolveCombat() {
                 if (hb.kind == HitKind::Giyu && hb.damage >= 15 &&
                     m->ForceOpening(fx))
                     giyu.mastery.xp += 3;
+                if (hb.kind == HitKind::Shinobu && hb.damage >= 10 &&
+                    m->ForceOpening(fx))
+                    shinobu.mastery.xp += 3;
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.kind == HitKind::Fire ? 0.04f : 0.015f);
                     PlaySfx(SFX_HIT, 0.6f, 0.95f);
@@ -233,6 +249,11 @@ void Game::ResolveCombat() {
                 CheckCollisionRecs(hb.rect, giyu.Rect())) {
                 giyu.hitMem.Remember(hb.attackId);
                 giyu.TakeDamage(hb.damage, hb.kbX, hb.kind, fx);
+            }
+            if (shinobu.Active() && !shinobu.hitMem.Seen(hb.attackId) &&
+                CheckCollisionRecs(hb.rect, shinobu.Rect())) {
+                shinobu.hitMem.Remember(hb.attackId);
+                shinobu.TakeDamage(hb.damage, hb.kbX, hb.kind, fx);
             }
             if (player.hitMem.Seen(hb.attackId)) continue;
             if (!CheckCollisionRecs(hb.rect, player.Rect())) continue;
@@ -279,9 +300,14 @@ void Game::UpdatePlaying(float dt) {
         // demons attack whichever slayer is closer; a hidden player is ignored
         Vector2 tgt = player.pos;
         bool tgtHidden = hidden;
-        if (giyu.Active() &&
-            (hidden || fabsf(giyu.pos.x - e.pos.x) < fabsf(player.pos.x - e.pos.x))) {
+        float bestD = hidden ? 1e9f : fabsf(player.pos.x - e.pos.x);
+        if (giyu.Active() && fabsf(giyu.pos.x - e.pos.x) < bestD) {
             tgt = giyu.pos;
+            tgtHidden = false;
+            bestD = fabsf(giyu.pos.x - e.pos.x);
+        }
+        if (shinobu.Active() && fabsf(shinobu.pos.x - e.pos.x) < bestD) {
+            tgt = shinobu.pos;
             tgtHidden = false;
         }
         e.Update(dt, tgt, combat, fx, tgtHidden);
@@ -289,16 +315,17 @@ void Game::UpdatePlaying(float dt) {
     SeparateEnemies(dt);
 
     int summonReq = 0;
-    boss.Update(dt, player, &giyu, combat, fx, summonReq);
+    boss.Update(dt, player, &giyu, &shinobu, combat, fx, summonReq);
     for (int i = 0; i < summonReq; i++) {
         if ((int)enemies.size() < cfg::MAX_ALIVE)
             SpawnDemonAtEdge(cfg::WAVE_KOKU);   // endgame-hardened demons
     }
 
-    akaza.Update(dt, player, &giyu, combat, fx);
-    douma.Update(dt, player, &giyu, combat, fx);
-    kokushibo.Update(dt, player, &giyu, combat, fx);
+    akaza.Update(dt, player, &giyu, &shinobu, combat, fx);
+    douma.Update(dt, player, &giyu, &shinobu, combat, fx);
+    kokushibo.Update(dt, player, &giyu, &shinobu, combat, fx);
     giyu.Update(dt, player, enemies, boss, akaza, ActiveMoon(), combat, fx);
+    shinobu.Update(dt, player, enemies, boss, akaza, ActiveMoon(), combat, fx);
 
     ResolveCombat();          // resolve first: every hitbox lands at least once,
     combat.Update(dt);        // even on a slow frame
@@ -344,6 +371,7 @@ void Game::UpdatePlaying(float dt) {
         deathT += dt;
         if (deathT > 1.6f) {
             giyu.mastery.Save();
+            shinobu.mastery.Save();
             state = GState::GameOver;
         }
         return;
@@ -385,7 +413,9 @@ void Game::UpdatePlaying(float dt) {
         prog.points += 4;
         player.Heal(40, fx);
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 6;
+        if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 6;
         giyu.mastery.Save();
+        shinobu.mastery.Save();
         moonFallT = 3.5f;
         moonFallText = "UPPER MOON THREE FALLS";
         StartWave(wave + 1);
@@ -395,7 +425,9 @@ void Game::UpdatePlaying(float dt) {
         prog.points += 5;
         player.Heal(40, fx);
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 8;
+        if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 8;
         giyu.mastery.Save();
+        shinobu.mastery.Save();
         moonFallT = 3.5f;
         moonFallText = "UPPER MOON TWO FALLS";
         StartWave(wave + 1);
@@ -406,7 +438,9 @@ void Game::UpdatePlaying(float dt) {
         prog.points += 6;
         player.Heal(50, fx);
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 10;
+        if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 10;
         giyu.mastery.Save();
+        shinobu.mastery.Save();
         introTarget = 3;
         state = GState::BossIntro;
         introT = 4.6f;
@@ -418,7 +452,9 @@ void Game::UpdatePlaying(float dt) {
         bossDefeatHandled = true;
         victoryTime = elapsed;
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 10;
+        if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 10;
         giyu.mastery.Save();
+        shinobu.mastery.Save();
         // the progenitor falls - his demons crumble with him
         for (auto& e : enemies) {
             fx.DeathBurst(e.pos, C(160, 40, 60), 1.0f);
@@ -470,6 +506,17 @@ void Game::Update(float rawDt) {
                 } else if (!giyu.Active() && giyu.summonCd > 0) {
                     fx.Text({ player.pos.x, player.pos.y - 86 }, C(150, 170, 200), 0.9f,
                             "giyu rests (%.0fs)", giyu.summonCd);
+                }
+            }
+            if (IsKeyPressed(KEY_B)) {
+                if (shinobu.CanSummon()) {
+                    shinobu.Summon(player.pos, fx);
+                } else if (shinobu.fallen) {
+                    fx.Text({ player.pos.x, player.pos.y - 104 }, C(220, 70, 120), 1.0f,
+                            "SHINOBU HAS FALLEN THIS RUN");
+                } else if (!shinobu.Active() && shinobu.summonCd > 0) {
+                    fx.Text({ player.pos.x, player.pos.y - 104 }, C(190, 150, 255), 0.9f,
+                            "shinobu rests (%.0fs)", shinobu.summonCd);
                 }
             }
             UpdatePlaying(gdt);
@@ -699,6 +746,39 @@ void Game::DrawUI() const {
                           i < glv ? C(255, 215, 120) : C(45, 40, 52));
     }
 
+    // Shinobu, the Insect Hashira (bottom-left)
+    {
+        int sx = 176, sy = cfg::SCREEN_H - 96;
+        Color scol = C(190, 150, 255);
+        DrawRectangleRounded({ (float)sx, (float)sy, 46, 46 }, 0.25f, 4, C(22, 18, 26));
+        if (shinobu.fallen) {
+            DrawRectangleRounded({ sx + 4.0f, sy + 4.0f, 38, 38 }, 0.25f, 4, C(48, 32, 48));
+            DrawText("X", sx + 16, sy + 11, 26, C(220, 70, 120));
+            DrawText("FALLEN", sx + 54, sy + 16, 14, C(220, 70, 120));
+        } else if (shinobu.Active()) {
+            DrawRectangleRounded({ sx + 4.0f, sy + 4.0f, 38, 38 }, 0.25f, 4, scol);
+            float f = Clampf(shinobu.activeT / shinobu.mastery.Duration(), 0, 1);
+            DrawRectangle(sx + 54, sy + 20, (int)(88 * f), 8, scol);
+            DrawRectangleLines(sx + 54, sy + 20, 88, 8, C(70, 55, 95));
+        } else if (shinobu.summonCd > 0) {
+            float f = Clampf(shinobu.summonCd / shinobu.mastery.SummonCd(), 0, 1);
+            DrawRectangleRounded({ sx + 4.0f, sy + 4.0f, 38, 38 }, 0.25f, 4, Fade(scol, 0.3f));
+            DrawRectangleRounded({ sx + 4.0f, sy + 4 + 38 * (1 - f), 38, 38 * f }, 0.25f, 4,
+                                 Fade(BLACK, 0.55f));
+            DrawText(TextFormat("%.0f", shinobu.summonCd), sx + 14, sy + 15, 16, WHITE);
+        } else {
+            float pulse = 0.72f + 0.28f * sinf((float)GetTime() * 5.4f);
+            DrawRectangleRounded({ sx + 4.0f, sy + 4.0f, 38, 38 }, 0.25f, 4, Fade(scol, pulse));
+            DrawText("READY", sx + 54, sy + 16, 14, Fade(scol, pulse));
+        }
+        DrawText("B", sx + 4, sy + 52, 13, C(200, 200, 210));
+        DrawText("SHIN", sx + 17, sy + 52, 13, Fade(scol, 0.9f));
+        int slv = shinobu.mastery.Level();
+        for (int i = 0; i < 5; i++)
+            DrawRectangle(sx + 54 + i * 9, sy + 36, 7, 4,
+                          i < slv ? C(255, 215, 120) : C(45, 40, 52));
+    }
+
     // right side: stats
     DrawText(TextFormat("KILLS %d", kills), cfg::SCREEN_W - 130, 20, 20, C(220, 210, 220));
     int m = (int)elapsed / 60, s = (int)elapsed % 60;
@@ -836,6 +916,13 @@ void Game::DrawUpgradeMenu() const {
     else
         CText(TextFormat("GIYU MASTERY  LV %d  -  %d xp  (next level at %d - fight beside him)",
               giyu.mastery.Level(), giyu.mastery.xp, nxt), fy + 48, 14, C(120, 190, 255));
+    int snxt = shinobu.mastery.NextThreshold();
+    if (snxt < 0)
+        CText(TextFormat("SHINOBU MASTERY  LV %d  -  %d xp  (MAX - wisteria bloom)",
+              shinobu.mastery.Level(), shinobu.mastery.xp), fy + 66, 14, C(190, 150, 255));
+    else
+        CText(TextFormat("SHINOBU MASTERY  LV %d  -  %d xp  (next level at %d - poison demons)",
+              shinobu.mastery.Level(), shinobu.mastery.xp, snxt), fy + 66, 14, C(190, 150, 255));
 }
 
 void Game::DrawOverlays() const {
@@ -853,8 +940,9 @@ void Game::DrawOverlays() const {
         CText("U SERPENT - venomous weaving flurry     H WIND - sweeping tornadoes", 394, 15, C(140, 220, 120));
         CText("M MIST - vanish, blink, ambush from the fog", 420, 15, C(185, 195, 215));
         CText("G - summon GIYU TOMIOKA, the Water Hashira. if he falls, he is gone for the run", 446, 15, C(120, 190, 255));
-        CText("Clear waves to earn points - press TAB in battle to upgrade your styles", 478, 16, C(255, 215, 120));
-        CText("P - pause      F11 - fullscreen", 508, 14, C(150, 150, 165));
+        CText("B - summon SHINOBU KOCHO, the Insect Hashira. poison, triage, and wisteria", 472, 15, C(190, 150, 255));
+        CText("Clear waves to earn points - press TAB in battle to upgrade your styles", 502, 16, C(255, 215, 120));
+        CText("P - pause      F11 - fullscreen", 532, 14, C(150, 150, 165));
 
         if (fmodf(gt, 1.2f) < 0.75f)
             CText("PRESS  ENTER  TO  BEGIN", 570, 26, C(240, 210, 130));
@@ -965,6 +1053,7 @@ void Game::Draw() {
     douma.Draw();
     kokushibo.Draw();
     giyu.Draw();
+    shinobu.Draw();
     if (state != GState::Title) player.Draw();
     fx.DrawWorld();
     fx.DrawTexts();

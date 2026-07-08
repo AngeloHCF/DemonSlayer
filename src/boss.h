@@ -16,6 +16,7 @@
 class Effects;
 class Player;
 class Giyu;
+class Shinobu;
 
 enum class BState {
     Inactive, Intro, Stalk,
@@ -48,7 +49,7 @@ public:
     void Activate(Vector2 p);
     // summonRequest: set to the number of demons the game should spawn this frame
     // ally: Giyu, whom Muzan will also hunt and strike (may be null/inactive)
-    void Update(float dt, Player& player, Giyu* ally, CombatSystem& cs,
+    void Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, CombatSystem& cs,
                 Effects& fx, int& summonRequest);
     void Draw() const;
     Rectangle Rect() const;
@@ -75,9 +76,10 @@ public:
     HitMemory hitMem;
 
 private:
-    void ChooseAttack(const Player& player, const Giyu* ally);
+    void ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu);
     void EnterRecover(float t);
     bool preyAlly = false;        // current attack aimed at Giyu instead of the player
+    bool preyShinobu = false;     // current attack aimed at Shinobu instead of the player
 
     float stateTimer = 0;
     float decideTimer = 0;
