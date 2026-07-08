@@ -73,6 +73,7 @@ public:
     float crouchT = 0;           // 0 standing .. 1 fully crouched (Left Shift)
     float chillT = 0;            // Douma's frost: slowed steps
     float hiddenT = 0;           // mist invisibility remaining
+    bool  invincible = false;    // developer testing toggle
     // hint set by Game each frame: x of nearest living target (homing styles)
     float huntX = 0;
     bool  hasHunt = false;

@@ -75,7 +75,9 @@ void Game::DebugStart(int jump) {
                      kokushibo.Activate(spawn); break;
             default: wave = cfg::WAVE_KOKU;
                      akazaHandled = doumaHandled = kokuHandled = true;
-                     boss.Activate(spawn); break;
+                     boss.Activate(spawn);
+                     StartMuzanSurvival();
+                     break;
         }
     }
     state = GState::Playing;
@@ -274,10 +276,35 @@ void Game::UpdateHashiraWithdrawals(float dt) {
         rengoku.Update(dt, player, enemies, boss, akaza, moon, combat, fx);
 }
 
+void Game::StartMuzanSurvival() {
+    muzanTimer = 300.0f;
+    muzanSurvival = true;
+    sunriseFinale = false;
+    sunriseOutroT = 0;
+    bossDefeatHandled = false;
+    fx.Text({ cfg::SCREEN_W * 0.5f, cfg::GROUND_Y - 230.0f }, C(255, 190, 130), 1.15f,
+            "SURVIVE UNTIL SUNRISE");
+}
+
+void Game::BeginSunriseFinale() {
+    if (sunriseFinale || !boss.active) return;
+    sunriseFinale = true;
+    sunriseOutroT = 6.2f;
+    muzanTimer = 0;
+    combat.Clear();
+    enemies.clear();
+    toSpawn = 0;
+    player.iframes = fmaxf(player.iframes, sunriseOutroT);
+    boss.BeginSunriseDeath(fx);
+    fx.Text({ cfg::SCREEN_W * 0.5f, 180.0f }, C(255, 230, 160), 1.5f,
+            "DAWN BREAKS");
+}
+
 void Game::StartRun() {
     prog.Reset();
     player.prog = &prog;
     player.Reset({ cfg::SCREEN_W * 0.5f, cfg::GROUND_Y - 60 });
+    player.invincible = devInvincible;
     player.maxHp = 200;
     player.hp = 200;
     enemies.clear();
@@ -300,6 +327,10 @@ void Game::StartRun() {
     akazaHandled = doumaHandled = kokuHandled = false;
     moonFallT = 0;
     victoryTime = 0;
+    muzanTimer = 300.0f;
+    muzanSurvival = false;
+    sunriseFinale = false;
+    sunriseOutroT = 0;
     StartWave(1);
     state = GState::Playing;
 }
@@ -537,8 +568,16 @@ void Game::UpdatePlaying(float dt) {
 
     int summonReq = 0;
     boss.Update(dt, player, &giyu, &shinobu, &rengoku, combat, fx, summonReq);
+    if (muzanSurvival && boss.active && !boss.Defeated()) {
+        if (!sunriseFinale && boss.Alive()) {
+            muzanTimer = fmaxf(0, muzanTimer - dt);
+            if (muzanTimer <= 0) BeginSunriseFinale();
+        } else if (sunriseFinale) {
+            sunriseOutroT = fmaxf(sunriseOutroT - dt, 0);
+        }
+    }
     for (int i = 0; i < summonReq; i++) {
-        if ((int)enemies.size() < cfg::MAX_ALIVE)
+        if (!sunriseFinale && (int)enemies.size() < cfg::MAX_ALIVE)
             SpawnDemonAtEdge(cfg::WAVE_KOKU);   // endgame-hardened demons
     }
 
@@ -603,7 +642,7 @@ void Game::UpdatePlaying(float dt) {
     if (moonFallT > 0) moonFallT -= dt;
 
     // wave cleared? the gauntlet decides what comes next
-    bool anyEncounterActive = boss.Alive() || akaza.Alive() ||
+    bool anyEncounterActive = (boss.active && !boss.Defeated()) || akaza.Alive() ||
                               douma.Alive() || kokushibo.Alive();
     bool defeatedEncounterPending = (akaza.Defeated() && !akazaHandled) ||
                                     (douma.Defeated() && !doumaHandled) ||
@@ -691,6 +730,8 @@ void Game::UpdatePlaying(float dt) {
     if (boss.Defeated() && !bossDefeatHandled) {
         bossDefeatHandled = true;
         victoryTime = elapsed;
+        muzanSurvival = false;
+        sunriseFinale = false;
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 10;
         if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 10;
         if (rengoku.summonedThisRun && !rengoku.fallen) rengoku.mastery.xp += 10;
@@ -730,6 +771,7 @@ void Game::Update(float rawDt) {
     float dt = fminf(rawDt, 1.0f / 30.0f);
     fx.Update(dt);                       // real dt: shake/particles run in hitstop
     float gdt = dt * fx.TimeScale();     // gameplay dt
+    player.invincible = devInvincible;
 
     switch (state) {
         case GState::Title:
@@ -740,7 +782,14 @@ void Game::Update(float rawDt) {
         case GState::Playing:
             if (IsKeyPressed(KEY_P))   { state = GState::Paused; return; }
             if (IsKeyPressed(KEY_TAB)) { state = GState::Upgrade; return; }
-            if (IsKeyPressed(KEY_F8))  { UnlockAllForTesting(); }
+            if (IsKeyPressed(KEY_F8))  {
+                devInvincible = !devInvincible;
+                player.invincible = devInvincible;
+                fx.Text({ player.pos.x, player.pos.y - 112 },
+                        devInvincible ? C(255, 230, 120) : C(180, 170, 150), 0.95f,
+                        devInvincible ? "DEV MODE: INVINCIBLE" : "DEV MODE OFF");
+                PlaySfx(SFX_PICKUP, 0.45f, devInvincible ? 1.35f : 0.75f);
+            }
             if (IsKeyPressed(KEY_G)) TrySummonHashira(0);
             if (IsKeyPressed(KEY_B)) TrySummonHashira(1);
             if (IsKeyPressed(KEY_R)) TrySummonHashira(2);
@@ -764,7 +813,10 @@ void Game::Update(float rawDt) {
                     case 0:  akaza.Activate(spawn); break;
                     case 1:  douma.Activate(spawn); break;
                     case 2:  kokushibo.Activate(spawn); break;
-                    default: boss.Activate(spawn); break;
+                    default:
+                        boss.Activate(spawn);
+                        StartMuzanSurvival();
+                        break;
                 }
                 state = GState::Playing;
             }
@@ -880,6 +932,17 @@ void Game::DrawBackground() const {
     if (boss.active && !boss.Defeated())
         DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H,
                       Fade(C(130, 0, 25), 0.07f + 0.02f * sinf(gt * 3.0f)));
+
+    if (muzanSurvival || sunriseFinale) {
+        float dawn = sunriseFinale ? 1.0f : Clampf((300.0f - muzanTimer) / 300.0f, 0, 1);
+        float warm = dawn * dawn;
+        DrawRectangleGradientV(0, 0, cfg::SCREEN_W, cfg::SCREEN_H,
+                               Fade(C(255, 185, 105), 0.04f + 0.22f * warm),
+                               Fade(C(255, 235, 185), 0.02f + 0.13f * warm));
+        DrawCircleGradient(1030, 82, 54 + 38 * warm,
+                           Fade(C(255, 230, 160), 0.15f + 0.55f * warm),
+                           Fade(C(255, 190, 100), 0.0f));
+    }
 }
 
 static void DrawVignette() {
@@ -947,6 +1010,9 @@ void Game::DrawUI() const {
     } else {
         DrawText(TextFormat("HASHIRA: %d / %d slots", HashiraSlotsUsed(), HashiraLimit()),
                  20, 154, 14, C(190, 175, 145));
+    }
+    if (devInvincible) {
+        DrawText("DEV MODE: INVINCIBLE", 20, 174, 14, C(255, 230, 120));
     }
 
     // Giyu, the Water Hashira (bottom-left)
@@ -1099,21 +1165,23 @@ void Game::DrawUI() const {
         else if (akaza.guardBroken > 0)
             CText("GUARD BROKEN", 64, 16, C(210, 200, 185));
     } else if (boss.active && !boss.Defeated()) {
-        float bw = 520;
+        float bw = 560;
         float f = Clampf(boss.hp / boss.maxHp, 0, 1);
         float x0 = cfg::SCREEN_W * 0.5f - bw * 0.5f;
-        CText("MUZAN - THE DEMON KING", 14, 20, C(240, 90, 100));
-        DrawRectangleRounded({ x0, 40, bw, 18 }, 0.5f, 6, C(24, 14, 20));
+        int remain = (int)ceilf(fmaxf(muzanTimer, 0));
+        int mm = remain / 60, ss = remain % 60;
+        Color timerC = muzanTimer <= 30.0f ? C(255, 230, 150) : C(255, 190, 120);
+        CText("SURVIVE UNTIL SUNRISE", 10, 20, timerC);
+        CText(TextFormat("%d:%02d", mm, ss), 34, 42, timerC);
+        DrawRectangleRounded({ x0, 82, bw, 14 }, 0.5f, 6, C(24, 14, 20));
         if (f > 0)
-            DrawRectangleRounded({ x0 + 3, 43, fmaxf((bw - 6) * f, 5), 12 }, 0.5f, 6, C(190, 25, 45));
-        // phase notches (66% / 40% / 27% - the last is his true form)
-        DrawRectangle((int)(x0 + bw * 0.66f), 40, 2, 18, C(60, 30, 40));
-        DrawRectangle((int)(x0 + bw * 0.40f), 40, 2, 18, C(60, 30, 40));
-        DrawRectangle((int)(x0 + bw * 0.27f), 40, 2, 18, C(120, 30, 45));
+            DrawRectangleRounded({ x0 + 3, 85, fmaxf((bw - 6) * f, 5), 8 }, 0.5f, 6, C(190, 25, 45));
+        DrawText("MUZAN PRESSURE", (int)x0, 100, 13, C(220, 150, 150));
+        DrawText(TextFormat("PHASE %d", boss.phase), (int)(x0 + bw - 70), 100, 13, C(255, 130, 140));
         if (boss.vulnerable)
-            CText("VULNERABLE - STRIKE NOW!", 64, 16, C(255, 220, 90));
+            CText("OPENING - KEEP PRESSURE!", 118, 16, C(255, 220, 90));
         else if (boss.guardBroken > 0)
-            CText("GUARD BROKEN", 64, 16, C(210, 200, 185));
+            CText("REGENERATION SUPPRESSED", 118, 16, C(210, 200, 185));
     } else if (state == GState::Playing || state == GState::Paused || state == GState::Upgrade) {
         CText(TextFormat("WAVE %d / %d", wave, cfg::WAVE_KOKU), 16, 22, C(220, 210, 225));
         int remaining = toSpawn + (int)enemies.size();
@@ -1217,7 +1285,7 @@ void Game::DrawOverlays() const {
         DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(BLACK, 0.55f));
         CText("DEMON  SLAYER", 96, 74, C(235, 225, 235));
         CText("Night of the Demon King", 180, 26, C(180, 60, 70));
-        CText("Survive the waves. Grow stronger. Slay Muzan.", 234, 18, C(200, 195, 210));
+        CText("Survive the waves. Grow stronger. Hold Muzan until sunrise.", 234, 18, C(200, 195, 210));
 
         CText("A / D - move    W / SPACE - jump    SHIFT - crouch    J - combo    UP+J launcher    DOWN+J plunge", 300, 15, C(210, 220, 235));
         CText("K WATER - flowing multi-hit dash        L FIRE - explosive burst", 342, 15, C(120, 190, 255));
@@ -1228,7 +1296,7 @@ void Game::DrawOverlays() const {
         CText("B - summon SHINOBU KOCHO, the Insect Hashira. poison, triage, and wisteria", 472, 15, C(190, 150, 255));
         CText("R - summon KYOJURO RENGOKU, the Flame Hashira. burst damage and openings", 498, 15, C(255, 150, 55));
         CText("Clear waves to earn points - press TAB in battle to upgrade your styles", 528, 16, C(255, 215, 120));
-        CText("P - pause      F11 - fullscreen", 558, 14, C(150, 150, 165));
+        CText("P - pause      F8 - dev invincible      F11 - fullscreen", 558, 14, C(150, 150, 165));
 
         if (fmodf(gt, 1.2f) < 0.75f)
             CText("PRESS  ENTER  TO  BEGIN", 610, 26, C(240, 210, 130));
@@ -1241,6 +1309,13 @@ void Game::DrawOverlays() const {
                   Fade(C(255, 215, 120), a));
         if (wave == cfg::BOSS_WAVE || wave == cfg::WAVE_DOUMA || wave == cfg::WAVE_KOKU)
             CText("something stirs in the dark...", 348, 20, Fade(C(220, 80, 90), a));
+    }
+    else if (state == GState::Playing && sunriseFinale) {
+        float a = Clampf(sunriseOutroT / 1.2f, 0, 1);
+        DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(C(255, 210, 130), 0.16f));
+        CText("DAWN  BREAKS", 205, 64, Fade(C(255, 235, 170), a));
+        CText("Muzan claws for the shadows as sunlight burns him away",
+              294, 20, Fade(C(255, 230, 205), a));
     }
     else if (state == GState::BossIntro) {
         if (introTarget == 0) {
@@ -1281,9 +1356,9 @@ void Game::DrawOverlays() const {
                 float q = 1.0f - introT / 2.6f;
                 int size = (int)(40 + 34 * q);
                 CText("THE  DEMON  KING  APPROACHES", 280, size, Fade(C(230, 40, 60), Clampf(q * 2, 0, 1)));
-                CText("Muzan takes half damage while active - strike when he is VULNERABLE",
+                CText("Muzan cannot be slain by your blade - survive five minutes until sunrise",
                       400, 17, Fade(C(230, 200, 200), q));
-                CText("Water slows him. Stone shatters his guard. Fire crushes his recovery.",
+                CText("Pressure slows his regeneration. Hashira buy seconds. Do not stand still.",
                       428, 17, Fade(C(230, 200, 200), q));
             }
         }
@@ -1298,8 +1373,8 @@ void Game::DrawOverlays() const {
     }
     else if (state == GState::Victory) {
         DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(C(20, 8, 4), 0.6f));
-        CText("VICTORY", 210, 80, C(255, 210, 90));
-        CText("Muzan has been slain. The night is over.", 310, 22, C(235, 220, 210));
+        CText("SUNRISE", 210, 80, C(255, 220, 120));
+        CText("Muzan burns beneath the morning sun. The night is over.", 310, 22, C(235, 220, 210));
         int m = (int)victoryTime / 60, s = (int)victoryTime % 60;
         CText(TextFormat("time %02d:%02d      demons slain %d", m, s, kills), 370, 20, C(200, 195, 205));
         if (fmodf(gt, 1.2f) < 0.75f)

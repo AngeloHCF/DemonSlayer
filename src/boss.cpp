@@ -9,9 +9,12 @@
 #include <cmath>
 #include <algorithm>
 
-static const float RING_SPEED = 380.0f;
+static const float RING_SPEED = 560.0f;
+static const float MUZAN_REGEN_BASE = 9.0f;
+static const float MUZAN_PRESSURE_WINDOW = 2.2f;
 
-// phase thresholds: 1 > 66% > 2 > 40% > 3 > 27% > 4 (true form)
+// Muzan escalates by survival time and pressure damage. HP is a pressure meter;
+// sunrise, not blade damage, ends the fight.
 
 static bool RingIntersectsRect(Vector2 center, float radius, Rectangle r) {
     float cx = Clampf(center.x, r.x, r.x + r.width);
@@ -37,15 +40,20 @@ void Boss::Reset() {
     phase = 1;
     vulnerable = false;
     guardBroken = 0;
+    fightT = 0;
     hitMem.Clear();
     stateTimer = 0; decideTimer = 0;
+    tickT = 0;
+    comboLeft = 0;
     dashesLeft = 0; dashAttackId = -1;
-    slowTimer = 0; openingCd = 0; poisonT = 0; poisonTick = 0;
+    slowTimer = 0; openingCd = 0; pressureLock = 0; ultimateCd = 42.0f;
+    poisonT = 0; poisonTick = 0;
     hitFlash = 0; auraTimer = 0;
     preyAlly = false;
     preyShinobu = false;
     preyRengoku = false;
     despBlasted = false;
+    sunriseDeath = false;
     crescents.clear();
     ringsAtk.clear();
 }
@@ -55,12 +63,38 @@ void Boss::Activate(Vector2 p) {
     active = true;
     pos = p;
     state = BState::Intro;
-    stateTimer = 1.4f;
+    stateTimer = 1.15f;
+    decideTimer = 0.55f;
+    ultimateCd = 34.0f;
     PlaySfx(SFX_ROAR, 1.0f, 0.9f);
 }
 
 Rectangle Boss::Rect() const {
     return { pos.x - w * 0.5f, pos.y - h * 0.5f, w, h };
+}
+
+void Boss::BeginSunriseDeath(Effects& fx) {
+    if (!active || state == BState::Dead || state == BState::Dying) return;
+    state = BState::Dying;
+    stateTimer = 6.2f;
+    sunriseDeath = true;
+    vulnerable = false;
+    guardBroken = 0;
+    comboLeft = 0;
+    vel = { pos.x < cfg::SCREEN_W * 0.5f ? -220.0f : 220.0f, -120.0f };
+    facing = vel.x > 0 ? 1 : -1;
+    crescents.clear();
+    ringsAtk.clear();
+    fx.AddShake(1.0f);
+    fx.AddHitstop(0.35f);
+    fx.Ring(pos, 30, 520, 680, 16, C(255, 210, 130));
+    fx.FireExplosion({ pos.x, pos.y - 12 });
+    fx.Text({ pos.x, pos.y - h - 26 }, C(255, 225, 160), 1.55f,
+            "THE SUN RISES");
+    fx.Text({ pos.x, pos.y - h }, C(255, 120, 90), 1.05f,
+            "MUZAN BURNS");
+    PlaySfx(SFX_EXPLO, 1.0f, 0.55f);
+    PlaySfx(SFX_ROAR, 1.0f, 0.45f);
 }
 
 void Boss::EnterRecover(float t) {
@@ -70,14 +104,15 @@ void Boss::EnterRecover(float t) {
 
 void Boss::ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu,
                         const Rengoku* rengoku) {
-    // sometimes the Demon King turns his attention to a Hashira
+    // the Demon King actively hunts Hashira as well as the player
     preyAlly = false;
     preyShinobu = false;
     preyRengoku = false;
     bool gActive = ally && ally->Active();
     bool sActive = shinobu && shinobu->Active();
     bool rActive = rengoku && rengoku->Active();
-    if ((gActive || sActive || rActive) && GetRandomValue(0, 99) < 35) {
+    int allyTargetChance = phase >= 4 ? 68 : (phase >= 3 ? 58 : 46);
+    if ((gActive || sActive || rActive) && GetRandomValue(0, 99) < allyTargetChance) {
         float best = 1e9f;
         if (gActive) {
             best = fabsf(ally->pos.x - pos.x);
@@ -97,53 +132,67 @@ void Boss::ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* s
 
     float dist = fabsf(prey.x - pos.x);
     int roll = GetRandomValue(0, 99);
-    bool far = dist > 320;
+    bool far = dist > 360;
+    bool chained = comboLeft > 0;
 
     if (phase == 1) {
-        if (far)  { state = roll < 55 ? BState::TeleDash : BState::Summon; }
-        else      { state = roll < 60 ? BState::TeleClaws : BState::TeleDash; }
+        if (far)  { state = roll < 45 ? BState::TeleDash : (roll < 74 ? BState::TeleCrescent : BState::WhipStorm); }
+        else      { state = roll < 42 ? BState::TeleClaws : (roll < 74 ? BState::TeleDash : BState::TeleVanish); }
     }
     else if (phase == 2) {
         if (far) {
-            if      (roll < 30) state = BState::TeleDash;
+            if      (roll < 26) state = BState::TeleDash;
             else if (roll < 50) state = BState::TeleCrescent;
-            else if (roll < 72) state = BState::TeleVanish;
-            else                state = BState::Summon;
+            else if (roll < 72) state = BState::WhipStorm;
+            else if (roll < 90) state = BState::TeleVanish;
+            else                state = BState::Arena;
         } else {
-            if      (roll < 38) state = BState::TeleClaws;
-            else if (roll < 68) state = BState::TeleBlades;
+            if      (roll < 30) state = BState::TeleClaws;
+            else if (roll < 58) state = BState::TeleBlades;
+            else if (roll < 82) state = BState::WhipStorm;
             else                state = BState::TeleVanish;
         }
     }
     else { // phases 3 and 4: relentless
         if (far) {
-            if      (roll < 25) state = BState::TeleDash;
-            else if (roll < 50) state = BState::TeleVanish;
-            else if (roll < 68) state = BState::TeleCrescent;
-            else if (roll < 85) state = BState::TeleBlades;
-            else                state = BState::Summon;
+            if      (roll < 22) state = BState::TeleDash;
+            else if (roll < 42) state = BState::TeleVanish;
+            else if (roll < 62) state = BState::TeleCrescent;
+            else if (roll < 82) state = BState::WhipStorm;
+            else                state = BState::Arena;
         } else {
-            if      (roll < 35) state = BState::TeleBlades;
-            else if (roll < 65) state = BState::TeleVanish;
-            else                state = BState::TeleClaws;
+            if      (roll < 28) state = BState::TeleBlades;
+            else if (roll < 52) state = BState::WhipStorm;
+            else if (roll < 74) state = BState::TeleVanish;
+            else                state = BState::Arena;
         }
     }
+    if (chained && state == BState::Summon) state = BState::WhipStorm;
 
     // set telegraph timers
     switch (state) {
         case BState::TeleDash:
-            stateTimer = phase >= 3 ? 0.35f : 0.5f;
-            dashesLeft = phase >= 4 ? 3 : (phase == 3 ? 2 : 1);
+            stateTimer = phase >= 3 ? 0.24f : 0.36f;
+            dashesLeft = phase >= 4 ? 4 : (phase == 3 ? 3 : 2);
             break;
-        case BState::TeleClaws:    stateTimer = phase >= 3 ? 0.45f : 0.6f;  break;
-        case BState::TeleCrescent: stateTimer = phase >= 3 ? 0.35f : 0.45f; break;
-        case BState::TeleVanish:   stateTimer = vanishDur;                  break;
-        case BState::TeleBlades:   stateTimer = phase >= 3 ? 0.42f : 0.55f; break;
-        case BState::Summon:       stateTimer = 0.9f;                       break;
+        case BState::TeleClaws:    stateTimer = phase >= 3 ? 0.30f : 0.46f;  break;
+        case BState::TeleCrescent: stateTimer = phase >= 3 ? 0.22f : 0.34f; break;
+        case BState::TeleVanish:   stateTimer = vanishDur * (phase >= 3 ? 0.72f : 0.88f); break;
+        case BState::TeleBlades:   stateTimer = phase >= 3 ? 0.30f : 0.42f; break;
+        case BState::Summon:       stateTimer = 0.65f;                       break;
+        case BState::WhipStorm:
+            stateTimer = phase >= 4 ? 1.25f : (phase >= 3 ? 1.08f : 0.86f);
+            tickT = 0.03f;
+            break;
+        case BState::Arena:
+            stateTimer = phase >= 4 ? 1.55f : 1.25f;
+            tickT = 0.08f;
+            break;
         default: break;
     }
     // the true form gives no time to breathe
-    if (phase >= 4) stateTimer *= 0.75f;
+    if (phase >= 4 && state != BState::WhipStorm && state != BState::Arena)
+        stateTimer *= 0.68f;
 }
 
 void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
@@ -151,10 +200,13 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
     summonRequest = 0;
     if (!active || state == BState::Dead) return;
 
+    if (state != BState::Dying) fightT += dt;
     hitFlash  = fmaxf(hitFlash - dt, 0);
     slowTimer = fmaxf(slowTimer - dt, 0);
     guardBroken = fmaxf(guardBroken - dt, 0);
     openingCd = fmaxf(openingCd - dt, 0);
+    pressureLock = fmaxf(pressureLock - dt, 0);
+    ultimateCd = fmaxf(ultimateCd - dt, 0);
 
     // serpent venom gnaws at him, but cannot deliver the final blow
     if (poisonT > 0 && state != BState::Dying) {
@@ -169,10 +221,20 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
         }
     }
 
-    // phase by remaining health
-    int newPhase = hp > maxHp * 0.66f ? 1
-                 : hp > maxHp * 0.40f ? 2
-                 : hp > maxHp * 0.27f ? 3 : 4;
+    if (state != BState::Dying && state != BState::PhaseShift &&
+        state != BState::Desperation && hp < maxHp) {
+        float regen = MUZAN_REGEN_BASE + phase * 5.0f;
+        if (pressureLock > 0) regen *= 0.18f;
+        if (guardBroken > 0 || slowTimer > 0) regen *= 0.45f;
+        hp = fminf(maxHp, hp + regen * dt);
+    }
+
+    // survival phase: time guarantees escalation; damage can force it earlier.
+    int timePhase = fightT > 225.0f ? 4 : (fightT > 150.0f ? 3 : (fightT > 75.0f ? 2 : 1));
+    int damagePhase = hp > maxHp * 0.68f ? 1
+                    : hp > maxHp * 0.45f ? 2
+                    : hp > maxHp * 0.25f ? 3 : 4;
+    int newPhase = std::max(timePhase, damagePhase);
     if (newPhase != phase && state != BState::Dying) {
         phase = newPhase;
         if (phase >= 4) {
@@ -180,6 +242,7 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
             state = BState::Desperation;        // untouchable while transforming
             stateTimer = 3.8f;                  // 1.3s of charge, then a long blast
             despBlasted = false;
+            tickT = 0.05f;
             vel.x = 0;
             crescents.clear();
             ringsAtk.clear();
@@ -190,6 +253,10 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
             fx.Text({ pos.x, pos.y - h + 2 }, C(230, 190, 190), 1.0f, "RUN.");
             PlaySfx(SFX_ROAR, 1.0f, 0.55f);
         } else {
+            state = BState::PhaseShift;
+            stateTimer = 1.25f;
+            comboLeft = 0;
+            tickT = 0.05f;
             fx.AddShake(0.5f);
             fx.Ring(pos, 20, 300, 700, 10, C(220, 30, 50));
             fx.Text({ pos.x, pos.y - h }, C(255, 60, 60), 1.4f,
@@ -198,8 +265,24 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
         }
     }
 
-    float spdMult = (1.0f + 0.22f * (phase - 1)) * (slowTimer > 0 ? 0.55f : 1.0f);
-    float spd = 285.0f * spdMult;   // the Demon King outpaces even Upper Moons
+    if (state != BState::Dying && state != BState::Desperation &&
+        state != BState::PhaseShift && phase >= 3 && ultimateCd <= 0) {
+        state = BState::Desperation;
+        stateTimer = phase >= 4 ? 4.2f : 3.2f;
+        despBlasted = false;
+        comboLeft = 0;
+        vel.x = 0;
+        ultimateCd = phase >= 4 ? 34.0f : 46.0f;
+        tickT = 0.05f;
+        fx.AddShake(0.9f);
+        fx.Text({ pos.x, pos.y - h - 24 }, C(255, 50, 65), 1.35f,
+                "BLOOD WHIPS ERUPT");
+        PlaySfx(SFX_ROAR, 1.0f, 0.55f);
+    }
+
+    float spdMult = (1.0f + 0.35f * (phase - 1) + fightT / 420.0f) *
+                    (slowTimer > 0 ? 0.62f : 1.0f);
+    float spd = 390.0f * spdMult;   // the Demon King outpaces even Upper Moons
 
     // red aura in the late fight; a storm of it in his true form
     auraTimer -= dt;
@@ -218,11 +301,21 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
                  : (huntingShinobu ? shinobu->pos
                  : (huntingRengoku ? rengoku->pos : player.pos));
 
+    auto chainOrRecover = [&]() {
+        if (comboLeft > 0) {
+            comboLeft--;
+            ChooseAttack(player, ally, shinobu, rengoku);
+        } else {
+            float opening = phase >= 4 ? 0.22f : (phase == 3 ? 0.34f : 0.48f);
+            EnterRecover(opening);
+        }
+    };
+
     switch (state) {
         case BState::Intro: {
             stateTimer -= dt;
             fx.Ember({ pos.x + frnd(-40, 40), pos.y + frnd(-50, 30) });
-            if (stateTimer <= 0) { state = BState::Stalk; decideTimer = 1.2f; }
+            if (stateTimer <= 0) { state = BState::Stalk; decideTimer = 0.35f; }
             break;
         }
         case BState::Stalk: {
@@ -235,7 +328,29 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
                 if (fabsf(dx) > 150) vel.x = facing * spd;
                 else vel.x *= 1.0f - Clampf(6.0f * dt, 0, 1);
                 decideTimer -= dt;
-                if (decideTimer <= 0) ChooseAttack(player, ally, shinobu, rengoku);
+                if (fabsf(dx) < 110 && phase >= 2) vel.x = -facing * spd * 0.45f;
+                if (decideTimer <= 0) {
+                    comboLeft = 1 + phase + (fightT > 210.0f ? 1 : 0);
+                    ChooseAttack(player, ally, shinobu, rengoku);
+                }
+            }
+            break;
+        }
+        case BState::PhaseShift: {
+            stateTimer -= dt;
+            tickT -= dt;
+            vel.x = 0;
+            if (tickT <= 0) {
+                tickT = 0.12f;
+                fx.Ember({ pos.x + frnd(-w * 1.5f, w * 1.5f),
+                           pos.y + frnd(-h * 0.7f, h * 0.4f) });
+                fx.BloodSpray({ pos.x + frnd(-16, 16), pos.y - 8 },
+                              GetRandomValue(0, 1) ? 1 : -1, 0.65f);
+                fx.Ring(pos, 28, 240 + phase * 45.0f, 620, 8, C(220, 25, 45));
+            }
+            if (stateTimer <= 0) {
+                comboLeft = 2 + phase;
+                ChooseAttack(player, ally, shinobu, rengoku);
             }
             break;
         }
@@ -245,7 +360,7 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
             facing = prey.x > pos.x ? 1 : -1;
             if (stateTimer <= 0) {
                 state = BState::Dash;
-                stateTimer = 0.32f;
+                stateTimer = phase >= 3 ? 0.24f : 0.29f;
                 dashAttackId = cs.NewId();
                 fx.AddShake(0.15f);
                 PlaySfx(SFX_WHOOSH, 0.8f, 0.85f);
@@ -254,21 +369,22 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
         }
         case BState::Dash: {
             stateTimer -= dt;
-            float dashSpd = (phase >= 4 ? 1250.0f : 1100.0f) * (slowTimer > 0 ? 0.6f : 1.0f);
+            float dashSpd = (phase >= 4 ? 1680.0f : (phase >= 3 ? 1480.0f : 1300.0f)) *
+                            (slowTimer > 0 ? 0.68f : 1.0f);
             vel.x = facing * dashSpd;
             // afterimage streaks
             fx.Sparks({ pos.x - facing * 20.0f, pos.y }, facing > 0 ? 180.0f : 0.0f,
                       25, 3, C(200, 30, 45), 300, 3);
             Rectangle r = { pos.x - w * 0.7f, pos.y - h * 0.45f, w * 1.4f, h * 0.9f };
-            cs.Add(r, 24, facing * 650.0f, -380, 0.03f,
+            cs.Add(r, 42, facing * 1050.0f, -540, 0.035f,
                    Team::Enemy, HitKind::BossDash, dashAttackId);
             if (stateTimer <= 0) {
                 dashesLeft--;
                 if (dashesLeft > 0) {
                     state = BState::TeleDash;
-                    stateTimer = 0.22f;
+                    stateTimer = phase >= 3 ? 0.10f : 0.16f;
                 } else {
-                    EnterRecover(phase >= 4 ? 0.6f : (phase == 3 ? 0.75f : 1.0f));
+                    chainOrRecover();
                 }
             }
             break;
@@ -282,14 +398,15 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
                 fx.DeathBurst(pos, C(120, 20, 40), 0.7f);
                 // ...reappear beside his prey
                 float side = (GetRandomValue(0, 1) == 0) ? -1.0f : 1.0f;
-                pos.x = Clampf(prey.x + side * 125.0f, 60.0f, (float)cfg::SCREEN_W - 60.0f);
+                pos.x = Clampf(prey.x + side * (phase >= 3 ? 92.0f : 115.0f),
+                                60.0f, (float)cfg::SCREEN_W - 60.0f);
                 pos.y = cfg::GROUND_Y - h * 0.5f;
                 facing = prey.x > pos.x ? 1 : -1;
                 fx.DeathBurst(pos, C(200, 30, 55), 0.8f);
                 fx.AddShake(0.2f);
                 PlaySfx(SFX_WHOOSH, 0.9f, 0.6f);
                 state = BState::TeleStrike;
-                stateTimer = phase >= 3 ? 0.14f : 0.2f;
+                stateTimer = phase >= 3 ? 0.08f : 0.14f;
             }
             break;
         }
@@ -298,16 +415,16 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
             stateTimer -= dt;
             if (stateTimer <= 0) {
                 Rectangle r = {
-                    facing > 0 ? pos.x : pos.x - 130,
-                    pos.y - 60, 130, 120
+                    facing > 0 ? pos.x - 8 : pos.x - 190,
+                    pos.y - 76, 198, 148
                 };
-                cs.Add(r, 26, facing * 700.0f, -420, 0.06f,
+                cs.Add(r, 48, facing * 1180.0f, -560, 0.07f,
                        Team::Enemy, HitKind::BossAoe, cs.NewId());
                 float a0 = facing > 0 ? -70.0f : 250.0f;
                 float a1 = facing > 0 ? 70.0f : 110.0f;
                 fx.SlashArc(pos, 110, a0, a1, C(235, 45, 65));
                 PlaySfx(SFX_SLASH, 0.9f, 0.7f);
-                EnterRecover(phase >= 4 ? 0.55f : (phase == 3 ? 0.7f : 0.95f));
+                chainOrRecover();
             }
             break;
         }
@@ -316,19 +433,29 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
             stateTimer -= dt;
             // blades visibly grow out of his body during the telegraph (drawn in Draw)
             if (stateTimer <= 0) {
-                int n = phase >= 4 ? 16 : (phase == 3 ? 14 : 10);
+                int n = phase >= 4 ? 24 : (phase == 3 ? 18 : 13);
                 for (int i = 0; i < n; i++) {
                     float a = (360.0f / n) * i * DEG2RAD + frnd(-0.06f, 0.06f);
                     Crescent c;
                     c.pos = { pos.x, pos.y - 10 };
-                    c.vel = { cosf(a) * 430.0f, sinf(a) * 430.0f };
+                    c.vel = { cosf(a) * (560.0f + 35.0f * phase),
+                              sinf(a) * (560.0f + 35.0f * phase) };
                     crescents.push_back(c);
+                }
+                if (phase >= 3) {
+                    for (int i = 0; i < 5; i++) {
+                        Crescent c;
+                        float x = (i + 0.5f) * cfg::SCREEN_W / 5.0f;
+                        c.pos = { x, -25.0f };
+                        c.vel = { frnd(-110, 110), 640.0f + 60.0f * phase };
+                        crescents.push_back(c);
+                    }
                 }
                 fx.Ring({ pos.x, pos.y - 10 }, 14, 220, 640, 9, C(225, 35, 55));
                 fx.Sparks({ pos.x, pos.y - 10 }, -90, 360, 20, C(235, 60, 70), 420, 3);
                 fx.AddShake(0.3f);
                 PlaySfx(SFX_EXPLO, 0.6f, 1.3f);
-                EnterRecover(phase >= 3 ? 0.7f : 0.9f);
+                chainOrRecover();
             }
             break;
         }
@@ -337,10 +464,14 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
             stateTimer -= dt;
             if (stateTimer <= 0) {
                 state = BState::Claws;
-                stateTimer = 0.8f;
+                stateTimer = phase >= 3 ? 0.95f : 0.78f;
                 ringsAtk.clear();
-                for (int i = 0; i < 3; i++)
-                    ringsAtk.push_back({ pos, 26.0f - i * 22.0f, false });
+                int rings = phase >= 4 ? 7 : (phase >= 3 ? 5 : 4);
+                for (int i = 0; i < rings; i++) {
+                    Vector2 center = { pos.x + (i % 2 == 0 ? 0.0f : facing * 180.0f),
+                                       pos.y - 4 };
+                    ringsAtk.push_back({ center, 26.0f - i * 58.0f, false });
+                }
                 fx.AddShake(0.35f);
                 fx.Ring(pos, 20, 300, RING_SPEED, 9, C(230, 40, 60));
                 fx.Sparks({ pos.x, pos.y + h * 0.4f }, -90, 160, 18, C(230, 50, 60), 420, 3);
@@ -354,41 +485,41 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
                 rg.r += RING_SPEED * dt;
                 if (!rg.hitDone && rg.r > 20) {
                     float d = Dist(player.pos, rg.center);
-                    if (fabsf(d - rg.r) < 30 && player.pos.y > cfg::GROUND_Y - 130) {
+                    if (fabsf(d - rg.r) < 38 && player.pos.y > cfg::GROUND_Y - 160) {
                         rg.hitDone = true;
                         float dir = player.pos.x >= rg.center.x ? 1.0f : -1.0f;
-                        player.TakeDamage(50, dir * 550.0f, fx, true);
+                        player.TakeDamage(68, dir * 1040.0f, fx, true);
                     }
                     // the shockwave respects no ally either
                     if (!rg.hitDone && ally && ally->Active()) {
                         float dA = Dist(ally->pos, rg.center);
-                        if (fabsf(dA - rg.r) < 30 && ally->pos.y > cfg::GROUND_Y - 130) {
+                        if (fabsf(dA - rg.r) < 38 && ally->pos.y > cfg::GROUND_Y - 160) {
                             rg.hitDone = true;
                             float dir = ally->pos.x >= rg.center.x ? 1.0f : -1.0f;
-                            ally->TakeDamage(40, dir * 550.0f, HitKind::BossAoe, fx);
+                            ally->TakeDamage(58, dir * 900.0f, HitKind::BossAoe, fx);
                         }
                     }
                     if (!rg.hitDone && shinobu && shinobu->Active()) {
                         float dS = Dist(shinobu->pos, rg.center);
-                        if (fabsf(dS - rg.r) < 30 && shinobu->pos.y > cfg::GROUND_Y - 130) {
+                        if (fabsf(dS - rg.r) < 38 && shinobu->pos.y > cfg::GROUND_Y - 160) {
                             rg.hitDone = true;
                             float dir = shinobu->pos.x >= rg.center.x ? 1.0f : -1.0f;
-                            shinobu->TakeDamage(40, dir * 550.0f, HitKind::BossAoe, fx);
+                            shinobu->TakeDamage(58, dir * 900.0f, HitKind::BossAoe, fx);
                         }
                     }
                     if (!rg.hitDone && rengoku && rengoku->Active()) {
                         float dR = Dist(rengoku->pos, rg.center);
-                        if (fabsf(dR - rg.r) < 30 && rengoku->pos.y > cfg::GROUND_Y - 130) {
+                        if (fabsf(dR - rg.r) < 38 && rengoku->pos.y > cfg::GROUND_Y - 160) {
                             rg.hitDone = true;
                             float dir = rengoku->pos.x >= rg.center.x ? 1.0f : -1.0f;
-                            rengoku->TakeDamage(40, dir * 550.0f, HitKind::BossAoe, fx);
+                            rengoku->TakeDamage(58, dir * 900.0f, HitKind::BossAoe, fx);
                         }
                     }
                 }
             }
             if (stateTimer <= 0) {
                 ringsAtk.clear();
-                EnterRecover(phase >= 4 ? 0.7f : (phase == 3 ? 0.85f : 1.15f));
+                chainOrRecover();
             }
             break;
         }
@@ -397,12 +528,11 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
             stateTimer -= dt;
             fx.Ember({ pos.x + frnd(-50, 50), pos.y - h * 0.5f });
             if (stateTimer <= 0) {
-                summonRequest = 1 + phase;      // game spawns the demons
+                summonRequest = phase >= 4 ? 6 : (2 + phase);      // game spawns the demons
                 fx.AddShake(0.25f);
                 fx.Text({ pos.x, pos.y - h }, C(230, 60, 200), 1.1f, "RISE, MY DEMONS");
                 PlaySfx(SFX_ROAR, 0.6f, 1.2f);
-                state = BState::Stalk;
-                decideTimer = frnd(1.2f, 1.8f);
+                chainOrRecover();
             }
             break;
         }
@@ -411,40 +541,161 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
             stateTimer -= dt;
             facing = prey.x > pos.x ? 1 : -1;
             if (stateTimer <= 0) {
-                int n = phase >= 4 ? 7 : (phase == 3 ? 5 : 3);
+                int n = phase >= 4 ? 11 : (phase == 3 ? 8 : 5);
                 Vector2 origin = { pos.x + facing * 30.0f, pos.y - 16 };
                 float baseAng = atan2f(prey.y - origin.y, prey.x - origin.x);
                 for (int i = 0; i < n; i++) {
-                    float a = baseAng + (i - (n - 1) * 0.5f) * 0.16f;
+                    float a = baseAng + (i - (n - 1) * 0.5f) * (phase >= 3 ? 0.12f : 0.16f);
                     Crescent c;
                     c.pos = origin;
-                    c.vel = { cosf(a) * 470.0f, sinf(a) * 470.0f };
+                    c.vel = { cosf(a) * (650.0f + phase * 35.0f),
+                              sinf(a) * (650.0f + phase * 35.0f) };
                     crescents.push_back(c);
+                }
+                if (phase >= 3) {
+                    for (int i = 0; i < 2; i++) {
+                        Crescent c;
+                        float side = i == 0 ? -30.0f : cfg::SCREEN_W + 30.0f;
+                        c.pos = { side, prey.y - 80.0f + i * 120.0f };
+                        float a = atan2f(prey.y - c.pos.y, prey.x - c.pos.x);
+                        c.vel = { cosf(a) * 720.0f, sinf(a) * 720.0f };
+                        crescents.push_back(c);
+                    }
                 }
                 fx.Sparks(origin, facing > 0 ? 0.0f : 180.0f, 60, 10, C(255, 40, 60), 380, 3);
                 PlaySfx(SFX_SLASH, 0.7f, 0.6f);
-                EnterRecover(0.7f);
+                chainOrRecover();
             }
+            break;
+        }
+        case BState::WhipStorm: {
+            stateTimer -= dt;
+            tickT -= dt;
+            float dx = prey.x - pos.x;
+            facing = dx > 0 ? 1 : -1;
+            vel.x = facing * spd * 0.35f;
+            if (tickT <= 0) {
+                tickT = phase >= 4 ? 0.105f : (phase >= 3 ? 0.13f : 0.16f);
+                int id = cs.NewId();
+                int side = GetRandomValue(0, 1) == 0 ? -1 : 1;
+                float y = Clampf(prey.y + frnd(-95, 85), 150.0f, cfg::GROUND_Y - 34.0f);
+                Rectangle sweep = side < 0
+                    ? Rectangle{ -20.0f, y - 24.0f, prey.x + 190.0f, 48.0f }
+                    : Rectangle{ prey.x - 190.0f, y - 24.0f,
+                                 cfg::SCREEN_W - prey.x + 210.0f, 48.0f };
+                cs.Add(sweep, 40 + 5 * phase, -side * 1120.0f, -470.0f, 0.055f,
+                       Team::Enemy, HitKind::BossAoe, id);
+                fx.SlashArc({ side < 0 ? 0.0f : (float)cfg::SCREEN_W, y },
+                            230 + phase * 35.0f, side < 0 ? -30.0f : 210.0f,
+                            side < 0 ? 30.0f : 150.0f, C(220, 25, 45));
+                fx.Sparks({ side < 0 ? -10.0f : (float)cfg::SCREEN_W + 10.0f, y },
+                          side < 0 ? 0.0f : 180.0f, 18, 10, C(255, 55, 70), 760, 3);
+
+                if (phase >= 2) {
+                    float x = Clampf(prey.x + frnd(-190, 190), 65.0f, cfg::SCREEN_W - 65.0f);
+                    Rectangle drop = { x - 28.0f, 0.0f, 56.0f, cfg::GROUND_Y - 22.0f };
+                    cs.Add(drop, 34 + 5 * phase, (x < prey.x ? 1.0f : -1.0f) * 800.0f,
+                           -560.0f, 0.045f, Team::Enemy, HitKind::BossAoe, cs.NewId());
+                    fx.Sparks({ x, 0 }, 90, 18, 9, C(255, 45, 65), 780, 3);
+                    fx.Ring({ x, cfg::GROUND_Y - 35.0f }, 8, 80, 520, 5, C(230, 35, 55));
+                }
+                if (phase >= 4 && GetRandomValue(0, 1) == 0) {
+                    Rectangle floor = { 0.0f, cfg::GROUND_Y - 74.0f,
+                                        (float)cfg::SCREEN_W, 64.0f };
+                    cs.Add(floor, 32, prey.x < cfg::SCREEN_W * 0.5f ? 880.0f : -880.0f,
+                           -390.0f, 0.045f, Team::Enemy, HitKind::BossAoe, cs.NewId());
+                    fx.Ring({ cfg::SCREEN_W * 0.5f, cfg::GROUND_Y - 38.0f },
+                            20, 620, 920, 7, C(185, 18, 35));
+                }
+                fx.AddShake(phase >= 4 ? 0.22f : 0.12f);
+                PlaySfx(SFX_SLASH, 0.45f, 0.55f);
+            }
+            if (stateTimer <= 0) chainOrRecover();
+            break;
+        }
+        case BState::Arena: {
+            stateTimer -= dt;
+            tickT -= dt;
+            vel.x *= 1.0f - Clampf(7.0f * dt, 0, 1);
+            if (tickT <= 0) {
+                tickT = phase >= 4 ? 0.20f : 0.26f;
+                int lane = GetRandomValue(0, 3);
+                Rectangle zone{};
+                float kb = 0;
+                if (lane == 0) {
+                    zone = { 0.0f, cfg::GROUND_Y - 210.0f,
+                             cfg::SCREEN_W * 0.48f, 190.0f };
+                    kb = 980.0f;
+                } else if (lane == 1) {
+                    zone = { cfg::SCREEN_W * 0.52f, cfg::GROUND_Y - 210.0f,
+                             cfg::SCREEN_W * 0.48f, 190.0f };
+                    kb = -980.0f;
+                } else if (lane == 2) {
+                    zone = { cfg::SCREEN_W * 0.24f, 70.0f,
+                             cfg::SCREEN_W * 0.52f, cfg::GROUND_Y - 100.0f };
+                    kb = prey.x < cfg::SCREEN_W * 0.5f ? -860.0f : 860.0f;
+                } else {
+                    zone = { 0.0f, cfg::GROUND_Y - 92.0f,
+                             (float)cfg::SCREEN_W, 82.0f };
+                    kb = prey.x < cfg::SCREEN_W * 0.5f ? 900.0f : -900.0f;
+                }
+                cs.Add(zone, 46 + 5 * phase, kb, -520.0f, 0.06f,
+                       Team::Enemy, HitKind::BossAoe, cs.NewId());
+                Vector2 center = { zone.x + zone.width * 0.5f, zone.y + zone.height * 0.5f };
+                fx.Ring(center, 16, fmaxf(zone.width, zone.height) * 0.55f,
+                        960, 9, C(230, 28, 48));
+                fx.FireExplosion({ center.x, fminf(center.y, cfg::GROUND_Y - 48.0f) });
+                fx.AddShake(phase >= 4 ? 0.38f : 0.25f);
+                PlaySfx(SFX_EXPLO, 0.45f, 0.65f);
+            }
+            if (stateTimer <= 0) chainOrRecover();
             break;
         }
         case BState::Desperation: {
             stateTimer -= dt;
+            tickT -= dt;
             vel.x = 0;
+            fx.AddShake(phase >= 4 ? 0.035f : 0.02f);
             if (!despBlasted) {
                 // the night itself is drawn into his flesh
-                for (int i = 0; i < 2; i++) {
+                for (int i = 0; i < 4; i++) {
                     float a = frnd(0, 360);
                     Vector2 sp = { pos.x + cosf(a * DEG2RAD) * 110.0f,
                                    pos.y - 10 + sinf(a * DEG2RAD) * 110.0f };
                     fx.Sparks(sp, a + 180.0f, 8, 1, C(220, 30, 50), 520, 3);
                 }
                 fx.Ember({ pos.x + frnd(-w, w), pos.y + frnd(-h * 0.5f, h * 0.5f) });
-                if (stateTimer <= 2.5f) {
+                if (tickT <= 0) {
+                    tickT = 0.18f;
+                    Rectangle warning = { frnd(0, cfg::SCREEN_W - 180.0f),
+                                          cfg::GROUND_Y - frnd(130, 250),
+                                          frnd(160, 360), frnd(42, 85) };
+                    cs.Add(warning, 22 + 3 * phase,
+                           warning.x < player.pos.x ? 640.0f : -640.0f,
+                           -360.0f, 0.035f, Team::Enemy, HitKind::BossAoe, cs.NewId());
+                    fx.Sparks({ warning.x + warning.width * 0.5f,
+                                warning.y + warning.height * 0.5f },
+                              -90, 360, 8, C(255, 45, 65), 620, 3);
+                }
+                if (stateTimer <= (phase >= 4 ? 3.0f : 2.2f)) {
                     despBlasted = true;
                     // THE ERUPTION - wave after wave of it
                     ringsAtk.clear();
-                    for (int i = 0; i < 6; i++)
-                        ringsAtk.push_back({ { pos.x, pos.y - 8 }, 26.0f - i * 240.0f, false });
+                    for (int i = 0; i < (phase >= 4 ? 10 : 7); i++)
+                        ringsAtk.push_back({ { pos.x, pos.y - 8 }, 26.0f - i * 190.0f, false });
+                    for (int i = 0; i < 14 + phase * 3; i++) {
+                        Crescent c;
+                        float side = (i % 4 == 0) ? -40.0f
+                                   : (i % 4 == 1) ? cfg::SCREEN_W + 40.0f
+                                   : frnd(40.0f, cfg::SCREEN_W - 40.0f);
+                        c.pos = { side, (i % 4 < 2) ? frnd(90.0f, cfg::GROUND_Y - 70.0f) : -35.0f };
+                        Vector2 tgt = { frnd(120.0f, cfg::SCREEN_W - 120.0f),
+                                        frnd(150.0f, cfg::GROUND_Y - 55.0f) };
+                        float a = atan2f(tgt.y - c.pos.y, tgt.x - c.pos.x);
+                        c.vel = { cosf(a) * (760.0f + phase * 70.0f),
+                                  sinf(a) * (760.0f + phase * 70.0f) };
+                        crescents.push_back(c);
+                    }
                     fx.FireExplosion(pos);
                     fx.DeathBurst({ pos.x, pos.y - 10 }, C(210, 25, 45), 3.0f);
                     fx.BloodSpray({ pos.x, pos.y - 10 }, 1, 2.5f);
@@ -461,38 +712,49 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
             } else {
                 // the blast wave rolls outward - outrun it or be swallowed
                 for (auto& rg : ringsAtk) {
-                    rg.r += 860.0f * dt;
-                    if (!rg.hitDone && rg.r > 20 && rg.r < 560) {
-                        if (fabsf(Dist(player.pos, rg.center) - rg.r) < 34) {
+                    rg.r += (960.0f + phase * 80.0f) * dt;
+                    if (!rg.hitDone && rg.r > 20 && rg.r < 720) {
+                        if (fabsf(Dist(player.pos, rg.center) - rg.r) < 42) {
                             rg.hitDone = true;
                             float dir = player.pos.x >= rg.center.x ? 1.0f : -1.0f;
-                            player.TakeDamage(70, dir * 820.0f, fx, true);
+                            player.TakeDamage(86, dir * 1250.0f, fx, true);
                         }
                         if (!rg.hitDone && ally && ally->Active() &&
-                            fabsf(Dist(ally->pos, rg.center) - rg.r) < 34) {
+                            fabsf(Dist(ally->pos, rg.center) - rg.r) < 42) {
                             rg.hitDone = true;
                             float dir = ally->pos.x >= rg.center.x ? 1.0f : -1.0f;
-                            ally->TakeDamage(50, dir * 820.0f, HitKind::BossAoe, fx);
+                            ally->TakeDamage(68, dir * 1050.0f, HitKind::BossAoe, fx);
                         }
                         if (!rg.hitDone && shinobu && shinobu->Active() &&
-                            fabsf(Dist(shinobu->pos, rg.center) - rg.r) < 34) {
+                            fabsf(Dist(shinobu->pos, rg.center) - rg.r) < 42) {
                             rg.hitDone = true;
                             float dir = shinobu->pos.x >= rg.center.x ? 1.0f : -1.0f;
-                            shinobu->TakeDamage(50, dir * 820.0f, HitKind::BossAoe, fx);
+                            shinobu->TakeDamage(68, dir * 1050.0f, HitKind::BossAoe, fx);
                         }
                         if (!rg.hitDone && rengoku && rengoku->Active() &&
-                            fabsf(Dist(rengoku->pos, rg.center) - rg.r) < 34) {
+                            fabsf(Dist(rengoku->pos, rg.center) - rg.r) < 42) {
                             rg.hitDone = true;
                             float dir = rengoku->pos.x >= rg.center.x ? 1.0f : -1.0f;
-                            rengoku->TakeDamage(50, dir * 820.0f, HitKind::BossAoe, fx);
+                            rengoku->TakeDamage(68, dir * 1050.0f, HitKind::BossAoe, fx);
                         }
                     }
+                }
+                if (tickT <= 0) {
+                    tickT = phase >= 4 ? 0.16f : 0.22f;
+                    Rectangle lane = { frnd(0, cfg::SCREEN_W - 140.0f),
+                                       frnd(75.0f, cfg::GROUND_Y - 145.0f),
+                                       frnd(120.0f, 300.0f), frnd(85.0f, 165.0f) };
+                    cs.Add(lane, 40 + 5 * phase,
+                           lane.x < player.pos.x ? 940.0f : -940.0f,
+                           -520.0f, 0.055f, Team::Enemy, HitKind::BossAoe, cs.NewId());
+                    fx.FireExplosion({ lane.x + lane.width * 0.5f, lane.y + lane.height * 0.5f });
+                    fx.AddShake(0.22f);
                 }
             }
             if (stateTimer <= 0) {
                 ringsAtk.clear();
-                state = BState::Stalk;
-                decideTimer = 0.8f;
+                comboLeft = 2 + phase;
+                ChooseAttack(player, ally, shinobu, rengoku);
             }
             break;
         }
@@ -501,22 +763,37 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
             vel.x *= 1.0f - Clampf(5.0f * dt, 0, 1);
             if (stateTimer <= 0) {
                 state = BState::Stalk;
-                decideTimer = frnd(0.7f, 1.3f) / (0.8f + 0.25f * phase);
+                decideTimer = frnd(0.16f, 0.42f) / (0.85f + 0.22f * phase);
             }
             break;
         }
         case BState::Dying: {
             stateTimer -= dt;
-            vel.x = 0;
-            if (fmodf(stateTimer, 0.18f) < 0.05f) {
-                fx.DeathBurst({ pos.x + frnd(-w, w), pos.y + frnd(-h * 0.5f, h * 0.5f) },
-                              C(220, 40, 60), 0.8f);
-                fx.AddShake(0.2f);
+            if (sunriseDeath) {
+                vel.x += facing * 24.0f * dt;
+                vel.y = fminf(vel.y + cfg::GRAVITY * 0.18f * dt, 220.0f);
+                if (pos.x < 80) facing = 1;
+                if (pos.x > cfg::SCREEN_W - 80) facing = -1;
+                fx.AddShake(0.03f);
+                if (fmodf(stateTimer, 0.12f) < 0.05f) {
+                    fx.FireExplosion({ pos.x + frnd(-w * 0.8f, w * 0.8f),
+                                       pos.y + frnd(-h * 0.6f, h * 0.45f) });
+                    fx.DeathBurst({ pos.x + frnd(-w, w), pos.y + frnd(-h * 0.5f, h * 0.5f) },
+                                  C(255, 170, 90), 0.85f);
+                    fx.Text({ pos.x, pos.y - h - 18 }, C(255, 225, 170), 0.75f, "SUNLIGHT");
+                }
+            } else {
+                vel.x = 0;
+                if (fmodf(stateTimer, 0.18f) < 0.05f) {
+                    fx.DeathBurst({ pos.x + frnd(-w, w), pos.y + frnd(-h * 0.5f, h * 0.5f) },
+                                  C(220, 40, 60), 0.8f);
+                    fx.AddShake(0.2f);
+                }
             }
             if (stateTimer <= 0) {
                 state = BState::Dead;
                 fx.FireExplosion(pos);
-                fx.DeathBurst(pos, C(230, 40, 60), 2.6f);
+                fx.DeathBurst(pos, sunriseDeath ? C(255, 210, 120) : C(230, 40, 60), 2.6f);
                 fx.AddShake(1.0f);
                 fx.AddHitstop(0.35f);
                 PlaySfx(SFX_EXPLO, 1.0f, 0.7f);
@@ -534,24 +811,25 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
         c.pos.y += c.vel.y * dt;
         c.spin += 720.0f * dt;
         if (CheckCollisionCircleRec(c.pos, 13, player.Rect())) {
-            if (player.TakeDamage(24, (c.vel.x > 0 ? 1 : -1) * 380.0f, fx))
+            if (player.TakeDamage(34 + 3 * phase, (c.vel.x > 0 ? 1 : -1) * 720.0f, fx,
+                                  phase >= 3))
                 c.alive = false;
         }
         if (c.alive && ally && ally->Active() &&
             CheckCollisionCircleRec(c.pos, 13, ally->Rect())) {
-            ally->TakeDamage(24, (c.vel.x > 0 ? 1 : -1) * 380.0f,
+            ally->TakeDamage(34 + 3 * phase, (c.vel.x > 0 ? 1 : -1) * 720.0f,
                              HitKind::BossProjectile, fx);
             c.alive = false;
         }
         if (c.alive && shinobu && shinobu->Active() &&
             CheckCollisionCircleRec(c.pos, 13, shinobu->Rect())) {
-            shinobu->TakeDamage(24, (c.vel.x > 0 ? 1 : -1) * 380.0f,
+            shinobu->TakeDamage(34 + 3 * phase, (c.vel.x > 0 ? 1 : -1) * 720.0f,
                                 HitKind::BossProjectile, fx);
             c.alive = false;
         }
         if (c.alive && rengoku && rengoku->Active() &&
             CheckCollisionCircleRec(c.pos, 13, rengoku->Rect())) {
-            rengoku->TakeDamage(24, (c.vel.x > 0 ? 1 : -1) * 380.0f,
+            rengoku->TakeDamage(34 + 3 * phase, (c.vel.x > 0 ? 1 : -1) * 720.0f,
                                 HitKind::BossProjectile, fx);
             c.alive = false;
         }
@@ -578,7 +856,7 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
 void Boss::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
     if (!active || state == BState::Dying || state == BState::Dead ||
         state == BState::Intro || state == BState::TeleVanish ||
-        state == BState::Desperation) return;
+        state == BState::Desperation || state == BState::PhaseShift) return;
 
     if (dmg <= 0) {                          // status-only field (mist cloud)
         if (kind == HitKind::Water) slowTimer = fmaxf(slowTimer, 0.8f);
@@ -586,8 +864,8 @@ void Boss::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
         return;
     }
 
-    float mult = (vulnerable || guardBroken > 0) ? 1.0f : 0.55f;
-    if (kind == HitKind::Fire && vulnerable) mult = 1.5f;
+    float mult = (vulnerable || guardBroken > 0) ? 1.0f : 0.35f;
+    if (kind == HitKind::Fire && vulnerable) mult = 1.35f;
     if (kind == HitKind::Rengoku && vulnerable) mult *= 1.25f;
     if (kind == HitKind::Water) slowTimer = 1.6f;
     if (kind == HitKind::Serpent) poisonT = 3.0f;
@@ -612,6 +890,7 @@ void Boss::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
 
     float dealt = dmg * mult;
     hp -= dealt;
+    pressureLock = fmaxf(pressureLock, MUZAN_PRESSURE_WINDOW + dealt * 0.015f);
     hitFlash = 0.14f;
 
     Color tcol = (vulnerable || guardBroken > 0) ? C(255, 220, 90) : C(200, 200, 200);
@@ -627,15 +906,18 @@ void Boss::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
             (vulnerable || guardBroken > 0) ? 1.25f : 0.95f, "%.0f", dealt);
     fx.HitSparks({ pos.x, pos.y - 10 }, kbx >= 0 ? 1 : -1, tcol);
 
-    if (hp <= 0) {
-        hp = 0;
-        state = BState::Dying;
-        stateTimer = 2.2f;
-        vulnerable = false;
-        crescents.clear();
-        ringsAtk.clear();
-        fx.AddShake(0.8f);
-        fx.AddHitstop(0.5f);
+    if (hp <= maxHp * 0.08f) {
+        hp = maxHp * 0.08f;
+        pressureLock = fmaxf(pressureLock, 4.0f);
+        slowTimer = fmaxf(slowTimer, 0.6f);
+        if (state != BState::Recover && state != BState::PhaseShift) {
+            comboLeft = 0;
+            EnterRecover(phase >= 4 ? 0.18f : 0.35f);
+            fx.Text({ pos.x, pos.y - h - 30 }, C(255, 220, 90), 1.1f,
+                    "STALL HIM UNTIL SUNRISE");
+            fx.Ring(pos, 18, 190, 620, 8, C(255, 220, 90));
+            fx.AddShake(0.35f);
+        }
     }
 }
 
@@ -644,11 +926,14 @@ bool Boss::ForceOpening(Effects& fx) {
     bool interruptible =
         state == BState::Stalk || state == BState::TeleDash ||
         state == BState::TeleClaws || state == BState::TeleCrescent ||
-        state == BState::TeleBlades;
+        state == BState::TeleBlades || state == BState::WhipStorm ||
+        state == BState::Arena;
     if (!interruptible) return false;
-    openingCd = 12.0f;
+    openingCd = 7.0f;
+    pressureLock = fmaxf(pressureLock, 3.0f);
     dashesLeft = 0;
-    EnterRecover(1.1f);
+    comboLeft = 0;
+    EnterRecover(phase >= 4 ? 0.35f : 0.65f);
     fx.Text({ pos.x, pos.y - h - 14 }, C(120, 190, 255), 1.25f, "GIYU CREATES AN OPENING");
     fx.Ring(pos, 16, 150, 520, 8, C(120, 190, 255));
     fx.AddShake(0.25f);
@@ -714,6 +999,8 @@ void Boss::Draw() const {
     // fading out mid-teleport
     float bodyA = 1.0f;
     if (state == BState::TeleVanish) bodyA = Clampf(stateTimer / vanishDur, 0.15f, 1.0f);
+    if (state == BState::Dying && sunriseDeath)
+        bodyA = 0.45f + 0.35f * sinf(gt * 18.0f);
 
     // shadow
     DrawEllipse((int)pos.x, (int)(cfg::GROUND_Y + 6), 26, 7, Fade(BLACK, 0.4f * bodyA));
@@ -739,7 +1026,8 @@ void Boss::Draw() const {
     float bx = pos.x + lean, by = pos.y;
     bool telegraphing = (state == BState::TeleDash || state == BState::TeleClaws ||
                          state == BState::TeleCrescent || state == BState::TeleBlades ||
-                         state == BState::TeleStrike);
+                         state == BState::TeleStrike || state == BState::WhipStorm ||
+                         state == BState::Arena || state == BState::PhaseShift);
     if (telegraphing && fmodf(gt * 12.0f, 1.0f) < 0.5f) suit = C(255, 120, 120);
 
     // vulnerable golden outline / guard broken gray outline
@@ -764,6 +1052,38 @@ void Boss::Draw() const {
             DrawLineEx(root, tip, 4.0f * t + 1, Fade(C(200, 25, 45), 0.85f));
             DrawLineEx(root, tip, 1.5f, Fade(C(255, 120, 130), 0.85f));
         }
+    }
+    if (state == BState::PhaseShift) {
+        float p = 0.45f + 0.35f * sinf(gt * 16.0f);
+        DrawRing(pos, 72, 78, 0, 360, 48, Fade(C(255, 45, 65), p));
+        DrawRing(pos, 124, 131, 0, 360, 64, Fade(C(255, 120, 120), p * 0.6f));
+        DrawRectangleLinesEx({ bx - w * 0.7f, by - h * 0.7f, w * 1.4f, h * 1.35f },
+                             4, Fade(C(255, 70, 80), p));
+    }
+    if (state == BState::WhipStorm) {
+        float p = 0.18f + 0.12f * sinf(gt * 28.0f);
+        DrawRectangle(0, (int)cfg::GROUND_Y - 235, cfg::SCREEN_W, 198,
+                      Fade(C(180, 10, 30), p * 0.45f));
+        for (int i = 0; i < 7; i++) {
+            float y = cfg::GROUND_Y - 45.0f - i * 34.0f;
+            DrawLineEx({ 0.0f, y + sinf(gt * 12.0f + i) * 12.0f },
+                       { (float)cfg::SCREEN_W, y + cosf(gt * 13.0f + i) * 12.0f },
+                       3.0f, Fade(C(230, 30, 48), 0.34f));
+        }
+    }
+    if (state == BState::Arena) {
+        float p = 0.16f + 0.12f * sinf(gt * 20.0f);
+        DrawRectangle(0, (int)cfg::GROUND_Y - 230, cfg::SCREEN_W / 2, 210,
+                      Fade(C(210, 20, 40), p));
+        DrawRectangle(cfg::SCREEN_W / 2, 90, cfg::SCREEN_W / 2, (int)cfg::GROUND_Y - 120,
+                      Fade(C(210, 20, 40), p * 0.75f));
+        DrawRing({ cfg::SCREEN_W * 0.5f, cfg::GROUND_Y - 88.0f },
+                 170, 178, 0, 360, 64, Fade(C(255, 80, 90), p));
+    }
+    if (state == BState::Desperation) {
+        float p = 0.35f + 0.28f * sinf(gt * 26.0f);
+        DrawRing(pos, 190, 202, 0, 360, 72, Fade(C(255, 40, 55), p));
+        DrawRing(pos, 330, 342, 0, 360, 96, Fade(C(255, 120, 120), p * 0.45f));
     }
 
     // legs (black slacks)
@@ -839,7 +1159,7 @@ void Boss::Draw() const {
     }
     if (state == BState::TeleStrike) {
         // flash where the slash is about to land
-        Rectangle warn = { facing > 0 ? pos.x : pos.x - 130, pos.y - 60, 130, 120 };
+        Rectangle warn = { facing > 0 ? pos.x - 8 : pos.x - 190, pos.y - 76, 198, 148 };
         DrawRectangleRec(warn, Fade(C(230, 40, 60), 0.14f + 0.1f * sinf(gt * 30.0f)));
     }
 

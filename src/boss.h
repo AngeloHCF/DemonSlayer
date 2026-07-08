@@ -27,7 +27,10 @@ enum class BState {
     TeleCrescent,
     TeleVanish, TeleStrike,       // teleport behind the player, slash
     TeleBlades,                   // blades erupt from his body, radial burst
-    Desperation,                  // at 27%: his flesh erupts before the true form
+    WhipStorm,                    // multi-direction black blood whips
+    Arena,                        // wide-area arena denial
+    PhaseShift,                   // invulnerable transformation between phases
+    Desperation,                  // violent blood-whip ultimate during the survival fight
     Recover,
     Dying, Dead
 };
@@ -55,6 +58,7 @@ public:
     void Draw() const;
     Rectangle Rect() const;
     void TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx);
+    void BeginSunriseDeath(Effects& fx);
 
     // companion support: Giyu can pry open Muzan's defense (internal cooldown)
     bool ForceOpening(Effects& fx);
@@ -77,6 +81,7 @@ public:
     int   phase = 1;
     bool  vulnerable = false;
     float guardBroken = 0;        // Stone Breathing debuff timer
+    float fightT = 0;             // seconds survived against Muzan
     HitMemory hitMem;
 
 private:
@@ -89,16 +94,21 @@ private:
 
     float stateTimer = 0;
     float decideTimer = 0;
+    float tickT = 0;
+    int   comboLeft = 0;
     int   dashesLeft = 0;
     int   dashAttackId = -1;
     float slowTimer = 0;
     float openingCd = 0;          // limits how often Giyu can force an opening
+    float pressureLock = 0;       // recent damage suppresses regeneration
+    float ultimateCd = 0;
     float poisonT = 0;            // serpent venom (cannot finish the king)
     float poisonTick = 0;
     float hitFlash = 0;
     float auraTimer = 0;
     float vanishDur = 0.32f;
     bool  despBlasted = false;    // desperation eruption fired
+    bool  sunriseDeath = false;
     std::vector<Crescent> crescents;
     std::vector<BossRing> ringsAtk;
 };

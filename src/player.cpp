@@ -43,6 +43,7 @@ void Player::Reset(Vector2 spawn) {
     multiAttackId = -1; waterTick = 0; waterPass = 0;
     loveSeg = 0; serpentTick = 0;
     crouchT = 0; chillT = 0; hiddenT = 0; mistAmbushT = 0;
+    invincible = false;
     hurtLen = 0.28f;
     hurtFlash = 0; runPhase = 0; wasAirborne = false;
     huntX = 0; hasHunt = false;
@@ -580,6 +581,10 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
 }
 
 bool Player::TakeDamage(float dmg, float kbx, Effects& fx, bool heavy) {
+    if (invincible) {
+        iframes = fmaxf(iframes, 0.05f);
+        return false;
+    }
     if (iframes > 0 || state == PState::Dead) return false;
     hp -= dmg;
     hurtFlash = 0.2f;

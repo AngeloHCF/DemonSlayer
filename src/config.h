@@ -34,7 +34,7 @@ inline constexpr int   PTS_PER_WAVE = 2;     // upgrade points per cleared wave
 inline constexpr int   BOSS_WAVE  = 6;       // Akaza (Upper Moon Three) after this wave
 inline constexpr int   WAVE_DOUMA = 11;      // Douma (Upper Moon Two) after this wave
 inline constexpr int   WAVE_KOKU  = 17;      // Kokushibo (Upper Moon One) after this wave
-inline constexpr float BOSS_HP    = 1500.0f; // Muzan comes after the last Upper Moon
+inline constexpr float BOSS_HP    = 3200.0f; // Muzan is a survival wall until sunrise
 inline constexpr int   MAX_ALIVE  = 28;      // spawn throttle
 } // namespace cfg
 

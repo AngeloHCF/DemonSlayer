@@ -1,6 +1,6 @@
 # Demon Slayer — Night of the Demon King
 
-2D side-view action game in pure **C++ / raylib**. Endless night, drifting fog, swarming demons — survive 6 waves, grow stronger between them, then slay the Demon King **Muzan**. All sound effects are synthesized in code at startup; there are no asset files.
+2D side-view action game in pure **C++ / raylib**. Endless night, drifting fog, swarming demons — survive the gauntlet, grow stronger between waves, then hold the Demon King **Muzan** until sunrise. All sound effects are synthesized in code at startup; there are no asset files.
 
 ## Controls
 
@@ -16,7 +16,7 @@
 | **↑ + J** | Upward launcher slash |
 | **↓ + J** (airborne) | Plunging strike with impact shockwave |
 | **TAB** | **Upgrade menu** — spend points earned from waves |
-| P | Pause · **F11** fullscreen · Enter confirm/restart |
+| P | Pause · **F8** dev invincible · **F11** fullscreen · Enter confirm/restart |
 
 ## Breathing Styles
 
@@ -86,7 +86,7 @@ The campaign is now **17 waves with three Upper Moons standing between you and M
 - **Waves 1–6 → Akaza (Upper Moon Three)** — falls from the sky into a cold, snow-swept arena. Fist barrages, heavy dash blow, ground shockwaves with fanned fist orbs, crater leaps. Rejoices (speeds up) below 40%.
 - **Waves 7–11 → Douma (Upper Moon Two)** — a blizzard arena. Ice shard fans that **chill** you (slowed steps), **frozen lotus** eruptions blooming under your feet, and a freezing breath cone. He glides away when pressed — never stand still.
 - **Waves 12–17 → Kokushibo (Upper Moon One)** — a violet moonfield. Moon-arc crescent barrages, flash-step cross slashes, and arena-wide **long slashes at chest height — CROUCH under them**. Six eyes see everything.
-- **Then Muzan.** The Demon King, with his true form waiting below 27%.
+- **Then Muzan.** The Demon King becomes a five-minute survival battle: stall him until sunrise, because blade damage cannot finish him.
 
 Each fallen Moon grants points (+4/+5/+6) and a heal, then the horde resumes, harder: more demons per wave, faster spawns, tougher mixes, higher HP/damage, and quicker, more aggressive attacks the deeper you go.
 
@@ -94,12 +94,12 @@ Each fallen Moon grants points (+4/+5/+6) and a heal, then the horde resumes, ha
 
 - **Akaza (40%)** — *"AKAZA CAN NO LONGER SENSE YOU"*: a blind spiral storm of air blasts fired in every direction for three full seconds.
 - **Kokushibo (40%)** — *"I WILL NOT DIE"*: hundreds of moon crescents erupt from the ground across the entire battlefield.
-- **Muzan (27%)** — *"THE DEMON KING REFUSES TO DIE. RUN."*: his flesh drinks the night, then erupts in a triple blast wave — sprint beyond its reach or be swallowed, and meet his true form in the aftermath.
+- **Muzan** — his desperation is no longer a single threshold. As dawn approaches he repeatedly triggers violent blood-whip eruptions, arena-wide blasts, and invulnerable transformations.
 
 Power scale is faithful to the anime: **Giyu < Akaza < Douma < Kokushibo < Muzan**. Giyu creates openings against all of them, but every Upper Moon actively hunts him and will win a prolonged duel.
 
 ## Muzan tips
-Muzan takes **half damage** while active. He dashes, **teleports behind you**, hurls blood crescents, erupts **radial blade bursts**, and summons demons — and below 27% HP he tears away his shirt into his **true form**: veins pulsing, triple dashes, denser projectiles, no time to breathe. Every clean hit he lands sends you **flying**. After most attacks he is **VULNERABLE** (golden outline): full damage, **Fire deals 1.5×**. **Stone** shatters his guard for 4s. **Water** slows his dash chains. **Serpent** venom keeps ticking while you dodge. **Mist** makes even the Demon King hesitate.
+Muzan is now a **sunrise survival fight**. The top timer counts down from **5:00**; victory happens only when dawn arrives. Damage does not kill him, but constant pressure suppresses his regeneration, slows his tempo, and can force brief openings. As time passes he escalates through phases with faster movement, longer combos, multi-direction blood whips, falling crescents, arena-wide attacks, repeated ultimates, and heavy knockback that can send you flying across the arena. Hashira automatically join this fight, but Muzan actively targets them too.
 
 ## Build
 
@@ -128,7 +128,7 @@ c++ src/*.cpp -o demonslayer -std=c++17 -O2 $(pkg-config --libs --cflags raylib)
 ```
 
 ## Dev flags
-`./demonslayer --demo` skips the title screen; `--akaza`, `--douma`, `--koku`, and `--boss` jump straight to Akaza / Douma / Kokushibo / Muzan. Add `--unlock-all` to start with every style track and mastery unlocked. During a run, press **F8** to unlock everything immediately.
+`./demonslayer --demo` skips the title screen; `--akaza`, `--douma`, `--koku`, and `--boss` jump straight to Akaza / Douma / Kokushibo / Muzan. Add `--unlock-all` to start with every style track and mastery unlocked. During a run, press **F8** to toggle developer invincibility.
 
 ## Code layout
 ```
@@ -144,7 +144,7 @@ src/rengoku.*   Kyojuro Rengoku: Flame Forms, burst support, mastery
 src/enemy.*     demon tiers, swarm AI, armor break, poison, mist confusion
 src/akaza.*     Akaza (Upper Moon Three): fist combos, shockwaves, leap craters
 src/moons.*     Douma (ice, lotus, chill) and Kokushibo (moon arcs, long slashes)
-src/boss.*      Muzan: dash, teleport, blade bursts, claws, summons, true form
+src/boss.*      Muzan: survival timer pressure, blood whips, arena attacks, sunrise finale
 src/game.*      states, waves, upgrade menu, atmosphere, HUD, combat resolution
 src/main.cpp    entry point, render-texture scaling, fullscreen
 ```

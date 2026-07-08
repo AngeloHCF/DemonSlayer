@@ -51,6 +51,8 @@ private:
     void AutoSummonMuzanHashira();
     void EndHashiraEncounter();
     void UpdateHashiraWithdrawals(float dt);
+    void StartMuzanSurvival();
+    void BeginSunriseFinale();
 
     void DrawBackground() const;
     void DrawUI() const;
@@ -91,4 +93,9 @@ private:
     float deathT = 0;           // delay before game-over screen
     bool  bossDefeatHandled = false;
     float victoryTime = 0;
+    bool  devInvincible = false;
+    float muzanTimer = 300.0f;
+    bool  muzanSurvival = false;
+    bool  sunriseFinale = false;
+    float sunriseOutroT = 0;
 };
