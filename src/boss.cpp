@@ -2,6 +2,7 @@
 #include "player.h"
 #include "companion.h"
 #include "shinobu.h"
+#include "rengoku.h"
 #include "effects.h"
 #include "config.h"
 #include "audio.h"
@@ -11,6 +12,21 @@
 static const float RING_SPEED = 380.0f;
 
 // phase thresholds: 1 > 66% > 2 > 40% > 3 > 27% > 4 (true form)
+
+static bool RingIntersectsRect(Vector2 center, float radius, Rectangle r) {
+    float cx = Clampf(center.x, r.x, r.x + r.width);
+    float cy = Clampf(center.y, r.y, r.y + r.height);
+    float minD = Dist(center, { cx, cy });
+    Vector2 corners[4] = {
+        { r.x, r.y },
+        { r.x + r.width, r.y },
+        { r.x, r.y + r.height },
+        { r.x + r.width, r.y + r.height }
+    };
+    float maxD = 0;
+    for (const auto& p : corners) maxD = fmaxf(maxD, Dist(center, p));
+    return radius + 36.0f >= minD && radius - 36.0f <= maxD;
+}
 
 void Boss::Reset() {
     active = false;
@@ -28,6 +44,7 @@ void Boss::Reset() {
     hitFlash = 0; auraTimer = 0;
     preyAlly = false;
     preyShinobu = false;
+    preyRengoku = false;
     despBlasted = false;
     crescents.clear();
     ringsAtk.clear();
@@ -51,24 +68,32 @@ void Boss::EnterRecover(float t) {
     stateTimer = t;
 }
 
-void Boss::ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu) {
+void Boss::ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu,
+                        const Rengoku* rengoku) {
     // sometimes the Demon King turns his attention to a Hashira
     preyAlly = false;
     preyShinobu = false;
+    preyRengoku = false;
     bool gActive = ally && ally->Active();
     bool sActive = shinobu && shinobu->Active();
-    if ((gActive || sActive) && GetRandomValue(0, 99) < 35) {
-        if (gActive && sActive) {
-            float dg = fabsf(ally->pos.x - pos.x);
-            float ds = fabsf(shinobu->pos.x - pos.x);
-            preyAlly = dg <= ds;
-            preyShinobu = !preyAlly;
-        } else {
-            preyAlly = gActive;
-            preyShinobu = sActive;
+    bool rActive = rengoku && rengoku->Active();
+    if ((gActive || sActive || rActive) && GetRandomValue(0, 99) < 35) {
+        float best = 1e9f;
+        if (gActive) {
+            best = fabsf(ally->pos.x - pos.x);
+            preyAlly = true;
+        }
+        if (sActive && fabsf(shinobu->pos.x - pos.x) < best) {
+            best = fabsf(shinobu->pos.x - pos.x);
+            preyAlly = false; preyShinobu = true; preyRengoku = false;
+        }
+        if (rActive && fabsf(rengoku->pos.x - pos.x) < best) {
+            preyAlly = false; preyShinobu = false; preyRengoku = true;
         }
     }
-    Vector2 prey = preyAlly ? ally->pos : (preyShinobu ? shinobu->pos : player.pos);
+    Vector2 prey = preyAlly ? ally->pos
+                 : (preyShinobu ? shinobu->pos
+                 : (preyRengoku ? rengoku->pos : player.pos));
 
     float dist = fabsf(prey.x - pos.x);
     int roll = GetRandomValue(0, 99);
@@ -121,8 +146,8 @@ void Boss::ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* s
     if (phase >= 4) stateTimer *= 0.75f;
 }
 
-void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, CombatSystem& cs,
-                  Effects& fx, int& summonRequest) {
+void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
+                  Rengoku* rengoku, CombatSystem& cs, Effects& fx, int& summonRequest) {
     summonRequest = 0;
     if (!active || state == BState::Dead) return;
 
@@ -188,7 +213,10 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Combat
     // whom is he hunting right now?
     bool huntingAlly = preyAlly && ally && ally->Active();
     bool huntingShinobu = preyShinobu && shinobu && shinobu->Active();
-    Vector2 prey = huntingAlly ? ally->pos : (huntingShinobu ? shinobu->pos : player.pos);
+    bool huntingRengoku = preyRengoku && rengoku && rengoku->Active();
+    Vector2 prey = huntingAlly ? ally->pos
+                 : (huntingShinobu ? shinobu->pos
+                 : (huntingRengoku ? rengoku->pos : player.pos));
 
     switch (state) {
         case BState::Intro: {
@@ -207,7 +235,7 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Combat
                 if (fabsf(dx) > 150) vel.x = facing * spd;
                 else vel.x *= 1.0f - Clampf(6.0f * dt, 0, 1);
                 decideTimer -= dt;
-                if (decideTimer <= 0) ChooseAttack(player, ally, shinobu);
+                if (decideTimer <= 0) ChooseAttack(player, ally, shinobu, rengoku);
             }
             break;
         }
@@ -348,6 +376,14 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Combat
                             shinobu->TakeDamage(40, dir * 550.0f, HitKind::BossAoe, fx);
                         }
                     }
+                    if (!rg.hitDone && rengoku && rengoku->Active()) {
+                        float dR = Dist(rengoku->pos, rg.center);
+                        if (fabsf(dR - rg.r) < 30 && rengoku->pos.y > cfg::GROUND_Y - 130) {
+                            rg.hitDone = true;
+                            float dir = rengoku->pos.x >= rg.center.x ? 1.0f : -1.0f;
+                            rengoku->TakeDamage(40, dir * 550.0f, HitKind::BossAoe, fx);
+                        }
+                    }
                 }
             }
             if (stateTimer <= 0) {
@@ -444,6 +480,12 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Combat
                             float dir = shinobu->pos.x >= rg.center.x ? 1.0f : -1.0f;
                             shinobu->TakeDamage(50, dir * 820.0f, HitKind::BossAoe, fx);
                         }
+                        if (!rg.hitDone && rengoku && rengoku->Active() &&
+                            fabsf(Dist(rengoku->pos, rg.center) - rg.r) < 34) {
+                            rg.hitDone = true;
+                            float dir = rengoku->pos.x >= rg.center.x ? 1.0f : -1.0f;
+                            rengoku->TakeDamage(50, dir * 820.0f, HitKind::BossAoe, fx);
+                        }
                     }
                 }
             }
@@ -507,6 +549,12 @@ void Boss::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Combat
                                 HitKind::BossProjectile, fx);
             c.alive = false;
         }
+        if (c.alive && rengoku && rengoku->Active() &&
+            CheckCollisionCircleRec(c.pos, 13, rengoku->Rect())) {
+            rengoku->TakeDamage(24, (c.vel.x > 0 ? 1 : -1) * 380.0f,
+                                HitKind::BossProjectile, fx);
+            c.alive = false;
+        }
         if (c.pos.x < -60 || c.pos.x > cfg::SCREEN_W + 60 ||
             c.pos.y < -60 || c.pos.y > cfg::SCREEN_H + 60)
             c.alive = false;
@@ -540,6 +588,7 @@ void Boss::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
 
     float mult = (vulnerable || guardBroken > 0) ? 1.0f : 0.55f;
     if (kind == HitKind::Fire && vulnerable) mult = 1.5f;
+    if (kind == HitKind::Rengoku && vulnerable) mult *= 1.25f;
     if (kind == HitKind::Water) slowTimer = 1.6f;
     if (kind == HitKind::Serpent) poisonT = 3.0f;
     if (kind == HitKind::Giyu) {
@@ -550,6 +599,10 @@ void Boss::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
     if (kind == HitKind::Shinobu) {
         mult *= 0.18f;
         poisonT = fmaxf(poisonT, 4.5f);
+    }
+    if (kind == HitKind::Rengoku) {
+        mult *= 0.30f;
+        slowTimer = fmaxf(slowTimer, 0.35f);
     }
     if (kind == HitKind::Stone && guardBroken <= 0) {
         guardBroken = 4.0f;
@@ -569,6 +622,7 @@ void Boss::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
     if (kind == HitKind::Wind)    tcol = C(215, 245, 230);
     if (kind == HitKind::Giyu)    tcol = C(120, 190, 255);
     if (kind == HitKind::Shinobu) tcol = C(190, 150, 255);
+    if (kind == HitKind::Rengoku) tcol = C(255, 150, 55);
     fx.Text({ pos.x, pos.y - h * 0.5f - 16 }, tcol,
             (vulnerable || guardBroken > 0) ? 1.25f : 0.95f, "%.0f", dealt);
     fx.HitSparks({ pos.x, pos.y - 10 }, kbx >= 0 ? 1 : -1, tcol);
@@ -606,6 +660,39 @@ int Boss::NullifyCrescents(Vector2 c, float r) {
     for (auto& cr : crescents) {
         if (cr.alive && Dist(cr.pos, c) < r) {
             cr.alive = false;
+            cut++;
+        }
+    }
+    return cut;
+}
+
+int Boss::NullifyCrescentsInRect(Rectangle r) {
+    int cut = 0;
+    for (auto& cr : crescents) {
+        if (cr.alive && CheckCollisionPointRec(cr.pos, r)) {
+            cr.alive = false;
+            cut++;
+        }
+    }
+    return cut;
+}
+
+int Boss::NullifyRings(Vector2 c, float r) {
+    int cut = 0;
+    for (auto& rg : ringsAtk) {
+        if (!rg.hitDone && rg.r > 20 && fabsf(Dist(c, rg.center) - rg.r) < r) {
+            rg.hitDone = true;
+            cut++;
+        }
+    }
+    return cut;
+}
+
+int Boss::NullifyRingsInRect(Rectangle r) {
+    int cut = 0;
+    for (auto& rg : ringsAtk) {
+        if (!rg.hitDone && rg.r > 20 && RingIntersectsRect(rg.center, rg.r, r)) {
+            rg.hitDone = true;
             cut++;
         }
     }

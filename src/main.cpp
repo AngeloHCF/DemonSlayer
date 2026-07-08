@@ -15,12 +15,14 @@
 int main(int argc, char** argv) {
     // jump flags: 0 waves, 1 Akaza, 2 Muzan, 3 Douma, 4 Kokushibo
     int jump = -1;
+    bool unlockAll = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--demo") == 0)  jump = 0;   // skip title screen
         if (strcmp(argv[i], "--akaza") == 0) jump = 1;
         if (strcmp(argv[i], "--boss") == 0)  jump = 2;   // straight to Muzan
         if (strcmp(argv[i], "--douma") == 0) jump = 3;
         if (strcmp(argv[i], "--koku") == 0)  jump = 4;
+        if (strcmp(argv[i], "--unlock-all") == 0) unlockAll = true;
     }
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
@@ -35,6 +37,10 @@ int main(int argc, char** argv) {
     Game game;
     game.Init();
     if (jump >= 0) game.DebugStart(jump);
+    if (unlockAll) {
+        if (jump < 0) game.DebugStart(0);
+        game.UnlockAllForTesting();
+    }
 
     while (!WindowShouldClose() && !game.quit) {
         if (IsKeyPressed(KEY_F11) ||

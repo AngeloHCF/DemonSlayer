@@ -6,6 +6,9 @@
 
 | Key | Action |
 |---|---|
+| **G** | Summon **Giyu Tomioka**, the Water Hashira |
+| **B** | Summon **Shinobu Kocho**, the Insect Hashira |
+| **R** | Summon **Kyojuro Rengoku**, the Flame Hashira |
 | A / D or ← / → | Move |
 | W / ↑ / Space | Jump |
 | **Left Shift** (hold) | **Crouch** — slower steps, lowered hurtbox (duck under crescents and fist orbs) |
@@ -29,11 +32,43 @@
 
 ## Giyu Tomioka — the Water Hashira
 
-Press **G** to summon Giyu as emergency support. He fights beside you for ~20–30s, then withdraws and rests (cooldown). He hunts the demons threatening you first, dodges like a Hashira, announces and cycles real Water Breathing Forms — never the same one twice in a row: **First Form: Water Surface Slash**, **Second Form: Water Wheel**, **Fourth Form: Striking Tide**, **Sixth Form: Whirlpool**, and at maximum mastery the **Eleventh Form: Dead Calm**, which nullifies every attack and blood crescent around him.
+Press **G** to summon Giyu as emergency support. He remains until the current wave or boss encounter ends, then withdraws. He hunts the demons threatening you first, dodges like a Hashira, announces and cycles real Water Breathing Forms — never the same one twice in a row: **First Form: Water Surface Slash**, **Second Form: Water Wheel**, **Fourth Form: Striking Tide**, **Sixth Form: Whirlpool**, and at maximum mastery the **Eleventh Form: Dead Calm**, which nullifies every attack and blood crescent around him.
 
 - **He cannot slay Muzan for you** — the Demon King takes a fraction of his damage. Instead, Giyu's heavy hits **force openings** (Muzan drops into a vulnerable recover) and Dead Calm shields you through burst phases.
+- **Ultimate guard:** when Akaza, Kokushibo, or Muzan enters a desperation ultimate, active Giyu immediately uses **Dead Calm: Ultimate Guard**. The stillness zone erases incoming hitboxes, projectiles, crescents, and blast rings until its shield health is spent.
 - **If Giyu falls, he is gone for the rest of the run.** Choose his moments carefully.
-- **Mastery persists across runs** (saved to `giyu_mastery.txt` next to the exe): he earns XP for kills, safe withdrawals, openings, and victories. Levels 1–5 grant better dodge AI, speed, shorter summon cooldown, more HP, stronger and faster forms, and Dead Calm (Lv5).
+- **Mastery persists across runs** (saved to `giyu_mastery.txt` next to the exe): he earns XP for kills, safe withdrawals, openings, and victories. Levels 1–5 grant better dodge AI, speed, more HP, stronger and faster forms, and stronger Dead Calm shield health.
+
+## Shinobu Kocho — the Insect Hashira
+
+Press **B** to summon Shinobu as fast support. She is more fragile than Giyu, but her Insect Breathing stings apply wisteria poison, interrupt swarms, and can force brief openings against Upper Moons. She uses **Butterfly: Caprice**, **Bee Sting**, **Dragonfly: Hexagon**, and **Centipede: Zigzag**; at maximum mastery she gains **Wisteria Bloom**, a poison cloud that lightly mends nearby wounds.
+
+- **She cannot carry the boss fights alone** — Upper Moons and Muzan heavily resist ally damage, but her poison keeps pressure on while you dodge.
+- **If Shinobu falls, she is gone for the rest of the run.**
+- **Mastery persists across runs** (saved to `shinobu_mastery.txt` next to the exe): she earns XP from kills, openings, safe withdrawals, and victories.
+
+## Kyojuro Rengoku — the Flame Hashira
+
+Press **R** to summon Rengoku as explosive support. He is the burst-damage ally: **Unknowing Fire**, **Rising Scorching Sun**, **Blazing Universe**, and **Flame Tiger** launch demons and create openings through raw pressure. At maximum mastery he unlocks **Ninth Form: Rengoku**, a high-commitment charge that burns through the field.
+
+- **He cannot slay the final bosses alone** — his Flame Hashira damage is resisted by Upper Moons and Muzan, but heavy forms can still force openings.
+- **Ultimate guard:** when Akaza, Kokushibo, or Muzan enters a desperation ultimate, active Rengoku raises **Flaming Wall** in front of him. The wall burns away projectiles, hostile hitboxes, and blast rings until its shield health is spent.
+- **If Rengoku falls, he is gone for the rest of the run.**
+- **Mastery persists across runs** (saved to `rengoku_mastery.txt` next to the exe): he earns XP from kills, openings, safe withdrawals, and victories. Each level increases Flaming Wall shield health.
+
+## Hashira summon rules
+
+Hashira are strategic allies, not timed abilities. Once summoned, a Hashira stays until the current wave or boss encounter ends. Their HP persists across summons; at the end of each wave or encounter, every surviving Hashira recovers **20% of max HP** and active Hashira run off-screen before leaving.
+
+If a Hashira falls during an encounter, that summon slot stays committed until the encounter ends. You cannot replace a fallen Hashira mid-wave or mid-boss fight.
+
+| Encounter | Hashira slot limit |
+|---|---:|
+| Normal waves | 1 |
+| Akaza | 1 |
+| Douma | 2 |
+| Kokushibo | 3 |
+| Muzan | all surviving Hashira auto-join |
 
 ## Progression
 
@@ -93,7 +128,7 @@ c++ src/*.cpp -o demonslayer -std=c++17 -O2 $(pkg-config --libs --cflags raylib)
 ```
 
 ## Dev flags
-`./demonslayer --demo` skips the title screen; `--akaza`, `--douma`, `--koku`, and `--boss` jump straight to Akaza / Douma / Kokushibo / Muzan (each with 8 upgrade points to play with).
+`./demonslayer --demo` skips the title screen; `--akaza`, `--douma`, `--koku`, and `--boss` jump straight to Akaza / Douma / Kokushibo / Muzan. Add `--unlock-all` to start with every style track and mastery unlocked. During a run, press **F8** to unlock everything immediately.
 
 ## Code layout
 ```
@@ -104,6 +139,8 @@ src/combat.*    hitbox system (teams, attack ids)
 src/audio.*     procedural SFX synth (hits, roars, gales, chimes, night wind)
 src/player.*    movement, combos, 7 breathing styles, tornadoes/zones/afterimages
 src/companion.* Giyu Tomioka: AI, Water Forms, permadeath, cross-run mastery
+src/shinobu.*   Shinobu Kocho: Insect Forms, poison support, triage, mastery
+src/rengoku.*   Kyojuro Rengoku: Flame Forms, burst support, mastery
 src/enemy.*     demon tiers, swarm AI, armor break, poison, mist confusion
 src/akaza.*     Akaza (Upper Moon Three): fist combos, shockwaves, leap craters
 src/moons.*     Douma (ice, lotus, chill) and Kokushibo (moon arcs, long slashes)

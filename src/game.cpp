@@ -49,6 +49,8 @@ void Game::Init() {
     giyu.ResetRun();
     shinobu.mastery.Load();
     shinobu.ResetRun();
+    rengoku.mastery.Load();
+    rengoku.ResetRun();
 }
 
 UpperMoon* Game::ActiveMoon() {
@@ -63,7 +65,7 @@ void Game::DebugStart(int jump) {
         toSpawn = 0;
         bannerT = 0;
         enemies.clear();
-        prog.points = 100;        // something to play with when testing bosses
+        prog.points = 0;        // something to play with when testing bosses
         Vector2 spawn = { cfg::SCREEN_W * 0.68f, cfg::GROUND_Y - 60 };
         switch (jump) {
             case 1:  wave = cfg::BOSS_WAVE;  akaza.Activate(spawn); break;
@@ -79,12 +81,205 @@ void Game::DebugStart(int jump) {
     state = GState::Playing;
 }
 
+void Game::UnlockAllForTesting() {
+    prog.UnlockAll();
+    fx.Text({ player.pos.x, player.pos.y - 112 }, C(255, 215, 120), 1.0f,
+            "ALL ABILITIES UNLOCKED");
+    PlaySfx(SFX_UPGRADE, 0.8f);
+}
+
+int Game::HashiraLimit() const {
+    if (boss.active && !boss.Defeated()) return 3;          // Muzan: all surviving Hashira
+    if (kokushibo.active && !kokushibo.Defeated()) return 3;
+    if (douma.active && !douma.Defeated()) return 2;
+    return 1;                                               // normal waves and Akaza
+}
+
+int Game::ActiveHashiraCount() const {
+    int n = 0;
+    if (giyu.Active()) n++;
+    if (shinobu.Active()) n++;
+    if (rengoku.Active()) n++;
+    return n;
+}
+
+int Game::HashiraSlotsUsed() const {
+    int n = 0;
+    if (giyuCommitted) n++;
+    if (shinobuCommitted) n++;
+    if (rengokuCommitted) n++;
+    return n;
+}
+
+bool Game::TrySummonHashira(int which) {
+    if (boss.active && !boss.Defeated()) {
+        fx.Text({ player.pos.x, player.pos.y - 110 }, C(240, 170, 100), 0.9f,
+                "all surviving hashira join Muzan automatically");
+        return false;
+    }
+
+    const int limit = HashiraLimit();
+    if (HashiraSlotsUsed() >= limit) {
+        fx.Text({ player.pos.x, player.pos.y - 94 }, C(190, 170, 140), 0.9f,
+                "hashira slots committed (%d/%d)", HashiraSlotsUsed(), limit);
+        PlaySfx(SFX_PICKUP, 0.35f, 0.55f);
+        return false;
+    }
+
+    switch (which) {
+        case 0:
+            if (giyuCommitted) {
+                fx.Text({ player.pos.x, player.pos.y - 86 }, C(120, 190, 255), 0.9f,
+                        "giyu is already committed");
+                return false;
+            }
+            if (giyu.fallen) {
+                fx.Text({ player.pos.x, player.pos.y - 86 }, C(200, 70, 80), 1.0f,
+                        "GIYU HAS FALLEN THIS RUN");
+                return false;
+            }
+            if (giyu.state != GiyuState::Inactive) {
+                fx.Text({ player.pos.x, player.pos.y - 86 }, C(120, 190, 255), 0.9f,
+                        "giyu is already deployed");
+                return false;
+            }
+            giyu.Summon(player.pos, fx);
+            giyuCommitted = true;
+            return true;
+        case 1:
+            if (shinobuCommitted) {
+                fx.Text({ player.pos.x, player.pos.y - 104 }, C(190, 150, 255), 0.9f,
+                        "shinobu is already committed");
+                return false;
+            }
+            if (shinobu.fallen) {
+                fx.Text({ player.pos.x, player.pos.y - 104 }, C(220, 70, 120), 1.0f,
+                        "SHINOBU HAS FALLEN THIS RUN");
+                return false;
+            }
+            if (shinobu.state != ShinobuState::Inactive) {
+                fx.Text({ player.pos.x, player.pos.y - 104 }, C(190, 150, 255), 0.9f,
+                        "shinobu is already deployed");
+                return false;
+            }
+            shinobu.Summon(player.pos, fx);
+            shinobuCommitted = true;
+            return true;
+        default:
+            if (rengokuCommitted) {
+                fx.Text({ player.pos.x, player.pos.y - 122 }, C(255, 150, 55), 0.9f,
+                        "rengoku is already committed");
+                return false;
+            }
+            if (rengoku.fallen) {
+                fx.Text({ player.pos.x, player.pos.y - 122 }, C(240, 90, 70), 1.0f,
+                        "RENGOKU HAS FALLEN THIS RUN");
+                return false;
+            }
+            if (rengoku.state != RengokuState::Inactive) {
+                fx.Text({ player.pos.x, player.pos.y - 122 }, C(255, 150, 55), 0.9f,
+                        "rengoku is already deployed");
+                return false;
+            }
+            rengoku.Summon(player.pos, fx);
+            rengokuCommitted = true;
+            return true;
+    }
+}
+
+void Game::AutoSummonMuzanHashira() {
+    if (!boss.active || boss.Defeated()) return;
+    if (!giyu.fallen && !giyuCommitted && giyu.state == GiyuState::Inactive) {
+        giyu.Summon(player.pos, fx);
+        giyuCommitted = true;
+    }
+    if (!shinobu.fallen && !shinobuCommitted && shinobu.state == ShinobuState::Inactive) {
+        shinobu.Summon(player.pos, fx);
+        shinobuCommitted = true;
+    }
+    if (!rengoku.fallen && !rengokuCommitted && rengoku.state == RengokuState::Inactive) {
+        rengoku.Summon(player.pos, fx);
+        rengokuCommitted = true;
+    }
+}
+
+void Game::EndHashiraEncounter() {
+    bool anyActive = false;
+    bool anyRecovered = false;
+
+    if (!giyu.fallen) {
+        anyActive = anyActive || giyu.Active();
+        giyu.maxHp = giyu.mastery.MaxHp();
+        float before = giyu.hp;
+        giyu.hp = fminf(giyu.maxHp, giyu.hp + giyu.maxHp * 0.20f);
+        anyRecovered = anyRecovered || giyu.hp > before + 0.5f;
+        if (giyu.Active()) {
+            giyu.mastery.xp += 5;
+            giyu.activeT = 0;
+            giyu.summonCd = 0;
+            giyu.mastery.Save();
+            giyu.BeginWithdraw(fx);
+        }
+    }
+    if (!shinobu.fallen) {
+        anyActive = anyActive || shinobu.Active();
+        shinobu.maxHp = shinobu.mastery.MaxHp();
+        float before = shinobu.hp;
+        shinobu.hp = fminf(shinobu.maxHp, shinobu.hp + shinobu.maxHp * 0.20f);
+        anyRecovered = anyRecovered || shinobu.hp > before + 0.5f;
+        if (shinobu.Active()) {
+            shinobu.mastery.xp += 5;
+            shinobu.activeT = 0;
+            shinobu.summonCd = 0;
+            shinobu.mastery.Save();
+            shinobu.BeginWithdraw(fx);
+        }
+    }
+    if (!rengoku.fallen) {
+        anyActive = anyActive || rengoku.Active();
+        rengoku.maxHp = rengoku.mastery.MaxHp();
+        float before = rengoku.hp;
+        rengoku.hp = fminf(rengoku.maxHp, rengoku.hp + rengoku.maxHp * 0.20f);
+        anyRecovered = anyRecovered || rengoku.hp > before + 0.5f;
+        if (rengoku.Active()) {
+            rengoku.mastery.xp += 5;
+            rengoku.activeT = 0;
+            rengoku.summonCd = 0;
+            rengoku.mastery.Save();
+            rengoku.BeginWithdraw(fx);
+        }
+    }
+
+    giyuCommitted = false;
+    shinobuCommitted = false;
+    rengokuCommitted = false;
+
+    if (anyActive) {
+        fx.Text({ player.pos.x, player.pos.y - 100 }, C(255, 215, 120), 1.0f,
+                "hashira withdraw");
+    }
+    if (anyRecovered) {
+        fx.Text({ player.pos.x, player.pos.y - 78 }, C(120, 220, 150), 0.9f,
+                "surviving hashira recover 20%%");
+    }
+}
+
+void Game::UpdateHashiraWithdrawals(float dt) {
+    UpperMoon* moon = ActiveMoon();
+    if (giyu.state == GiyuState::Withdraw)
+        giyu.Update(dt, player, enemies, boss, akaza, moon, combat, fx);
+    if (shinobu.state == ShinobuState::Withdraw)
+        shinobu.Update(dt, player, enemies, boss, akaza, moon, combat, fx);
+    if (rengoku.state == RengokuState::Withdraw)
+        rengoku.Update(dt, player, enemies, boss, akaza, moon, combat, fx);
+}
+
 void Game::StartRun() {
     prog.Reset();
     player.prog = &prog;
     player.Reset({ cfg::SCREEN_W * 0.5f, cfg::GROUND_Y - 60 });
-    player.maxHp = 1000;
-    player.hp = 1000;
+    player.maxHp = 200;
+    player.hp = 200;
     enemies.clear();
     pickups.clear();
     boss.Reset();
@@ -95,6 +290,8 @@ void Game::StartRun() {
     fx.Reset();
     giyu.ResetRun();
     shinobu.ResetRun();
+    rengoku.ResetRun();
+    giyuCommitted = shinobuCommitted = rengokuCommitted = false;
     kills = 0;
     elapsed = 0;
     deathT = 0;
@@ -184,6 +381,10 @@ void Game::ResolveCombat() {
                     shinobu.mastery.xp++;
                     shinobu.mastery.kills++;
                 }
+                if (!e.alive && hb.kind == HitKind::Rengoku && rengoku.mastery.xp < 999) {
+                    rengoku.mastery.xp++;
+                    rengoku.mastery.kills++;
+                }
             }
             if (boss.Alive() && !boss.hitMem.Seen(hb.attackId) &&
                 CheckCollisionRecs(hb.rect, boss.Rect())) {
@@ -195,6 +396,9 @@ void Game::ResolveCombat() {
                 if (hb.kind == HitKind::Shinobu && hb.damage >= 10 &&
                     boss.ForceOpening(fx))
                     shinobu.mastery.xp += 3;
+                if (hb.kind == HitKind::Rengoku && hb.damage >= 24 &&
+                    boss.ForceOpening(fx))
+                    rengoku.mastery.xp += 3;
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.kind == HitKind::Fire ? 0.04f : 0.015f);
                     PlaySfx(SFX_HIT, 0.6f, 0.85f);
@@ -214,6 +418,9 @@ void Game::ResolveCombat() {
                 if (hb.kind == HitKind::Shinobu && hb.damage >= 10 &&
                     akaza.ForceOpening(fx))
                     shinobu.mastery.xp += 3;
+                if (hb.kind == HitKind::Rengoku && hb.damage >= 24 &&
+                    akaza.ForceOpening(fx))
+                    rengoku.mastery.xp += 3;
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.kind == HitKind::Fire ? 0.04f : 0.015f);
                     PlaySfx(SFX_HIT, 0.6f, 1.0f);
@@ -235,6 +442,9 @@ void Game::ResolveCombat() {
                 if (hb.kind == HitKind::Shinobu && hb.damage >= 10 &&
                     m->ForceOpening(fx))
                     shinobu.mastery.xp += 3;
+                if (hb.kind == HitKind::Rengoku && hb.damage >= 24 &&
+                    m->ForceOpening(fx))
+                    rengoku.mastery.xp += 3;
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.kind == HitKind::Fire ? 0.04f : 0.015f);
                     PlaySfx(SFX_HIT, 0.6f, 0.95f);
@@ -254,6 +464,11 @@ void Game::ResolveCombat() {
                 CheckCollisionRecs(hb.rect, shinobu.Rect())) {
                 shinobu.hitMem.Remember(hb.attackId);
                 shinobu.TakeDamage(hb.damage, hb.kbX, hb.kind, fx);
+            }
+            if (rengoku.Active() && !rengoku.hitMem.Seen(hb.attackId) &&
+                CheckCollisionRecs(hb.rect, rengoku.Rect())) {
+                rengoku.hitMem.Remember(hb.attackId);
+                rengoku.TakeDamage(hb.damage, hb.kbX, hb.kind, fx);
             }
             if (player.hitMem.Seen(hb.attackId)) continue;
             if (!CheckCollisionRecs(hb.rect, player.Rect())) continue;
@@ -283,6 +498,7 @@ void Game::UpdatePlaying(float dt) {
     }
 
     player.Update(dt, combat, fx);
+    AutoSummonMuzanHashira();
 
     // spawning (paused during wave banner; ramps up slightly over time)
     if (toSpawn > 0 && bannerT <= 0) {
@@ -309,23 +525,29 @@ void Game::UpdatePlaying(float dt) {
         if (shinobu.Active() && fabsf(shinobu.pos.x - e.pos.x) < bestD) {
             tgt = shinobu.pos;
             tgtHidden = false;
+            bestD = fabsf(shinobu.pos.x - e.pos.x);
+        }
+        if (rengoku.Active() && fabsf(rengoku.pos.x - e.pos.x) < bestD) {
+            tgt = rengoku.pos;
+            tgtHidden = false;
         }
         e.Update(dt, tgt, combat, fx, tgtHidden);
     }
     SeparateEnemies(dt);
 
     int summonReq = 0;
-    boss.Update(dt, player, &giyu, &shinobu, combat, fx, summonReq);
+    boss.Update(dt, player, &giyu, &shinobu, &rengoku, combat, fx, summonReq);
     for (int i = 0; i < summonReq; i++) {
         if ((int)enemies.size() < cfg::MAX_ALIVE)
             SpawnDemonAtEdge(cfg::WAVE_KOKU);   // endgame-hardened demons
     }
 
-    akaza.Update(dt, player, &giyu, &shinobu, combat, fx);
-    douma.Update(dt, player, &giyu, &shinobu, combat, fx);
-    kokushibo.Update(dt, player, &giyu, &shinobu, combat, fx);
+    akaza.Update(dt, player, &giyu, &shinobu, &rengoku, combat, fx);
+    douma.Update(dt, player, &giyu, &shinobu, &rengoku, combat, fx);
+    kokushibo.Update(dt, player, &giyu, &shinobu, &rengoku, combat, fx);
     giyu.Update(dt, player, enemies, boss, akaza, ActiveMoon(), combat, fx);
     shinobu.Update(dt, player, enemies, boss, akaza, ActiveMoon(), combat, fx);
+    rengoku.Update(dt, player, enemies, boss, akaza, ActiveMoon(), combat, fx);
 
     ResolveCombat();          // resolve first: every hitbox lands at least once,
     combat.Update(dt);        // even on a slow frame
@@ -372,6 +594,7 @@ void Game::UpdatePlaying(float dt) {
         if (deathT > 1.6f) {
             giyu.mastery.Save();
             shinobu.mastery.Save();
+            rengoku.mastery.Save();
             state = GState::GameOver;
         }
         return;
@@ -380,28 +603,33 @@ void Game::UpdatePlaying(float dt) {
     if (moonFallT > 0) moonFallT -= dt;
 
     // wave cleared? the gauntlet decides what comes next
-    bool anyMoonUp = (akaza.active && !akaza.Defeated()) ||
-                     (douma.active && !douma.Defeated()) ||
-                     (kokushibo.active && !kokushibo.Defeated());
-    if (!boss.active && !anyMoonUp && toSpawn <= 0 && enemies.empty()) {
-        if (wave >= cfg::BOSS_WAVE && !akaza.active) {
-            introTarget = 0;
-            prog.points += cfg::PTS_PER_WAVE;
-            state = GState::BossIntro;
-            introT = 2.8f;
-            PlaySfx(SFX_ROAR, 0.8f, 1.1f);
-        } else if (wave >= cfg::WAVE_DOUMA && !douma.active) {
-            introTarget = 1;
-            prog.points += cfg::PTS_PER_WAVE;
-            state = GState::BossIntro;
-            introT = 3.0f;
-            PlaySfx(SFX_MIST, 1.0f, 0.6f);
-        } else if (wave >= cfg::WAVE_KOKU && !kokushibo.active) {
+    bool anyEncounterActive = boss.Alive() || akaza.Alive() ||
+                              douma.Alive() || kokushibo.Alive();
+    bool defeatedEncounterPending = (akaza.Defeated() && !akazaHandled) ||
+                                    (douma.Defeated() && !doumaHandled) ||
+                                    (kokushibo.Defeated() && !kokuHandled) ||
+                                    (boss.Defeated() && !bossDefeatHandled);
+    if (!anyEncounterActive && !defeatedEncounterPending &&
+        toSpawn <= 0 && enemies.empty()) {
+        EndHashiraEncounter();
+        if (wave >= cfg::WAVE_KOKU && !kokuHandled && !kokushibo.active) {
             introTarget = 2;
             prog.points += cfg::PTS_PER_WAVE;
             state = GState::BossIntro;
             introT = 3.2f;
             PlaySfx(SFX_ROAR, 0.9f, 0.65f);
+        } else if (wave >= cfg::WAVE_DOUMA && !doumaHandled && !douma.active) {
+            introTarget = 1;
+            prog.points += cfg::PTS_PER_WAVE;
+            state = GState::BossIntro;
+            introT = 3.0f;
+            PlaySfx(SFX_MIST, 1.0f, 0.6f);
+        } else if (wave >= cfg::BOSS_WAVE && !akazaHandled && !akaza.active) {
+            introTarget = 0;
+            prog.points += cfg::PTS_PER_WAVE;
+            state = GState::BossIntro;
+            introT = 2.8f;
+            PlaySfx(SFX_ROAR, 0.8f, 1.1f);
         } else if (wave < cfg::WAVE_KOKU) {
             StartWave(wave + 1);
         }
@@ -414,10 +642,14 @@ void Game::UpdatePlaying(float dt) {
         player.Heal(40, fx);
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 6;
         if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 6;
+        if (rengoku.summonedThisRun && !rengoku.fallen) rengoku.mastery.xp += 6;
+        EndHashiraEncounter();
         giyu.mastery.Save();
         shinobu.mastery.Save();
+        rengoku.mastery.Save();
         moonFallT = 3.5f;
         moonFallText = "UPPER MOON THREE FALLS";
+        akaza.Reset();
         StartWave(wave + 1);
     }
     if (douma.Defeated() && !doumaHandled) {
@@ -426,10 +658,14 @@ void Game::UpdatePlaying(float dt) {
         player.Heal(40, fx);
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 8;
         if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 8;
+        if (rengoku.summonedThisRun && !rengoku.fallen) rengoku.mastery.xp += 8;
+        EndHashiraEncounter();
         giyu.mastery.Save();
         shinobu.mastery.Save();
+        rengoku.mastery.Save();
         moonFallT = 3.5f;
         moonFallText = "UPPER MOON TWO FALLS";
+        douma.Reset();
         StartWave(wave + 1);
     }
     // the last moon falls - only the Demon King remains
@@ -439,8 +675,12 @@ void Game::UpdatePlaying(float dt) {
         player.Heal(50, fx);
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 10;
         if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 10;
+        if (rengoku.summonedThisRun && !rengoku.fallen) rengoku.mastery.xp += 10;
+        EndHashiraEncounter();
         giyu.mastery.Save();
         shinobu.mastery.Save();
+        rengoku.mastery.Save();
+        kokushibo.Reset();
         introTarget = 3;
         state = GState::BossIntro;
         introT = 4.6f;
@@ -453,8 +693,11 @@ void Game::UpdatePlaying(float dt) {
         victoryTime = elapsed;
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 10;
         if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 10;
+        if (rengoku.summonedThisRun && !rengoku.fallen) rengoku.mastery.xp += 10;
+        EndHashiraEncounter();
         giyu.mastery.Save();
         shinobu.mastery.Save();
+        rengoku.mastery.Save();
         // the progenitor falls - his demons crumble with him
         for (auto& e : enemies) {
             fx.DeathBurst(e.pos, C(160, 40, 60), 1.0f);
@@ -497,28 +740,10 @@ void Game::Update(float rawDt) {
         case GState::Playing:
             if (IsKeyPressed(KEY_P))   { state = GState::Paused; return; }
             if (IsKeyPressed(KEY_TAB)) { state = GState::Upgrade; return; }
-            if (IsKeyPressed(KEY_G)) {
-                if (giyu.CanSummon()) {
-                    giyu.Summon(player.pos, fx);
-                } else if (giyu.fallen) {
-                    fx.Text({ player.pos.x, player.pos.y - 86 }, C(200, 70, 80), 1.0f,
-                            "GIYU HAS FALLEN THIS RUN");
-                } else if (!giyu.Active() && giyu.summonCd > 0) {
-                    fx.Text({ player.pos.x, player.pos.y - 86 }, C(150, 170, 200), 0.9f,
-                            "giyu rests (%.0fs)", giyu.summonCd);
-                }
-            }
-            if (IsKeyPressed(KEY_B)) {
-                if (shinobu.CanSummon()) {
-                    shinobu.Summon(player.pos, fx);
-                } else if (shinobu.fallen) {
-                    fx.Text({ player.pos.x, player.pos.y - 104 }, C(220, 70, 120), 1.0f,
-                            "SHINOBU HAS FALLEN THIS RUN");
-                } else if (!shinobu.Active() && shinobu.summonCd > 0) {
-                    fx.Text({ player.pos.x, player.pos.y - 104 }, C(190, 150, 255), 0.9f,
-                            "shinobu rests (%.0fs)", shinobu.summonCd);
-                }
-            }
+            if (IsKeyPressed(KEY_F8))  { UnlockAllForTesting(); }
+            if (IsKeyPressed(KEY_G)) TrySummonHashira(0);
+            if (IsKeyPressed(KEY_B)) TrySummonHashira(1);
+            if (IsKeyPressed(KEY_R)) TrySummonHashira(2);
             UpdatePlaying(gdt);
             break;
 
@@ -528,6 +753,7 @@ void Game::Update(float rawDt) {
 
         case GState::BossIntro: {
             introT -= dt;
+            UpdateHashiraWithdrawals(gdt);
             if (fmodf(introT, 0.4f) < 0.05f) fx.AddShake(0.12f);
             fx.Ember({ frnd(0, (float)cfg::SCREEN_W), cfg::GROUND_Y - frnd(0, 100) });
             if (introT <= 0) {
@@ -549,6 +775,10 @@ void Game::Update(float rawDt) {
             break;
 
         case GState::Victory:
+            UpdateHashiraWithdrawals(gdt);
+            if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_R)) StartRun();
+            if (IsKeyPressed(KEY_ESCAPE)) quit = true;
+            break;
         case GState::GameOver:
             if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_R)) StartRun();
             if (IsKeyPressed(KEY_ESCAPE)) quit = true;
@@ -712,6 +942,12 @@ void Game::DrawUI() const {
     } else {
         DrawText("TAB - upgrades", 20, 132, 14, C(120, 115, 135));
     }
+    if (boss.active && !boss.Defeated()) {
+        DrawText("HASHIRA: ALL SURVIVORS DEPLOY", 20, 154, 14, C(240, 170, 100));
+    } else {
+        DrawText(TextFormat("HASHIRA: %d / %d slots", HashiraSlotsUsed(), HashiraLimit()),
+                 20, 154, 14, C(190, 175, 145));
+    }
 
     // Giyu, the Water Hashira (bottom-left)
     {
@@ -722,9 +958,12 @@ void Game::DrawUI() const {
             DrawRectangleRounded({ gx + 4.0f, gy + 4.0f, 38, 38 }, 0.25f, 4, C(48, 32, 40));
             DrawText("X", gx + 16, gy + 11, 26, C(190, 60, 70));
             DrawText("FALLEN", gx + 54, gy + 16, 14, C(190, 60, 70));
+        } else if (giyu.state == GiyuState::Withdraw) {
+            DrawRectangleRounded({ gx + 4.0f, gy + 4.0f, 38, 38 }, 0.25f, 4, Fade(gcol, 0.45f));
+            DrawText("EXIT", gx + 54, gy + 16, 14, Fade(gcol, 0.85f));
         } else if (giyu.Active()) {
             DrawRectangleRounded({ gx + 4.0f, gy + 4.0f, 38, 38 }, 0.25f, 4, gcol);
-            float f = Clampf(giyu.activeT / giyu.mastery.Duration(), 0, 1);
+            float f = Clampf(giyu.hp / giyu.maxHp, 0, 1);
             DrawRectangle(gx + 54, gy + 20, (int)(88 * f), 8, gcol);
             DrawRectangleLines(gx + 54, gy + 20, 88, 8, C(60, 70, 95));
         } else if (giyu.summonCd > 0) {
@@ -755,9 +994,12 @@ void Game::DrawUI() const {
             DrawRectangleRounded({ sx + 4.0f, sy + 4.0f, 38, 38 }, 0.25f, 4, C(48, 32, 48));
             DrawText("X", sx + 16, sy + 11, 26, C(220, 70, 120));
             DrawText("FALLEN", sx + 54, sy + 16, 14, C(220, 70, 120));
+        } else if (shinobu.state == ShinobuState::Withdraw) {
+            DrawRectangleRounded({ sx + 4.0f, sy + 4.0f, 38, 38 }, 0.25f, 4, Fade(scol, 0.45f));
+            DrawText("EXIT", sx + 54, sy + 16, 14, Fade(scol, 0.85f));
         } else if (shinobu.Active()) {
             DrawRectangleRounded({ sx + 4.0f, sy + 4.0f, 38, 38 }, 0.25f, 4, scol);
-            float f = Clampf(shinobu.activeT / shinobu.mastery.Duration(), 0, 1);
+            float f = Clampf(shinobu.hp / shinobu.maxHp, 0, 1);
             DrawRectangle(sx + 54, sy + 20, (int)(88 * f), 8, scol);
             DrawRectangleLines(sx + 54, sy + 20, 88, 8, C(70, 55, 95));
         } else if (shinobu.summonCd > 0) {
@@ -777,6 +1019,42 @@ void Game::DrawUI() const {
         for (int i = 0; i < 5; i++)
             DrawRectangle(sx + 54 + i * 9, sy + 36, 7, 4,
                           i < slv ? C(255, 215, 120) : C(45, 40, 52));
+    }
+
+    // Rengoku, the Flame Hashira (bottom-left)
+    {
+        int rx = 332, ry = cfg::SCREEN_H - 96;
+        Color rcol = C(255, 150, 55);
+        DrawRectangleRounded({ (float)rx, (float)ry, 46, 46 }, 0.25f, 4, C(22, 18, 26));
+        if (rengoku.fallen) {
+            DrawRectangleRounded({ rx + 4.0f, ry + 4.0f, 38, 38 }, 0.25f, 4, C(54, 30, 28));
+            DrawText("X", rx + 16, ry + 11, 26, C(240, 90, 70));
+            DrawText("FALLEN", rx + 54, ry + 16, 14, C(240, 90, 70));
+        } else if (rengoku.state == RengokuState::Withdraw) {
+            DrawRectangleRounded({ rx + 4.0f, ry + 4.0f, 38, 38 }, 0.25f, 4, Fade(rcol, 0.45f));
+            DrawText("EXIT", rx + 54, ry + 16, 14, Fade(rcol, 0.85f));
+        } else if (rengoku.Active()) {
+            DrawRectangleRounded({ rx + 4.0f, ry + 4.0f, 38, 38 }, 0.25f, 4, rcol);
+            float f = Clampf(rengoku.hp / rengoku.maxHp, 0, 1);
+            DrawRectangle(rx + 54, ry + 20, (int)(88 * f), 8, rcol);
+            DrawRectangleLines(rx + 54, ry + 20, 88, 8, C(85, 55, 38));
+        } else if (rengoku.summonCd > 0) {
+            float f = Clampf(rengoku.summonCd / rengoku.mastery.SummonCd(), 0, 1);
+            DrawRectangleRounded({ rx + 4.0f, ry + 4.0f, 38, 38 }, 0.25f, 4, Fade(rcol, 0.3f));
+            DrawRectangleRounded({ rx + 4.0f, ry + 4 + 38 * (1 - f), 38, 38 * f }, 0.25f, 4,
+                                 Fade(BLACK, 0.55f));
+            DrawText(TextFormat("%.0f", rengoku.summonCd), rx + 14, ry + 15, 16, WHITE);
+        } else {
+            float pulse = 0.72f + 0.28f * sinf((float)GetTime() * 5.8f);
+            DrawRectangleRounded({ rx + 4.0f, ry + 4.0f, 38, 38 }, 0.25f, 4, Fade(rcol, pulse));
+            DrawText("READY", rx + 54, ry + 16, 14, Fade(rcol, pulse));
+        }
+        DrawText("R", rx + 4, ry + 52, 13, C(200, 200, 210));
+        DrawText("REN", rx + 17, ry + 52, 13, Fade(rcol, 0.9f));
+        int rlv = rengoku.mastery.Level();
+        for (int i = 0; i < 5; i++)
+            DrawRectangle(rx + 54 + i * 9, ry + 36, 7, 4,
+                          i < rlv ? C(255, 215, 120) : C(45, 40, 52));
     }
 
     // right side: stats
@@ -923,6 +1201,13 @@ void Game::DrawUpgradeMenu() const {
     else
         CText(TextFormat("SHINOBU MASTERY  LV %d  -  %d xp  (next level at %d - poison demons)",
               shinobu.mastery.Level(), shinobu.mastery.xp, snxt), fy + 66, 14, C(190, 150, 255));
+    int rnxt = rengoku.mastery.NextThreshold();
+    if (rnxt < 0)
+        CText(TextFormat("RENGOKU MASTERY  LV %d  -  %d xp  (MAX - Ninth Form)",
+              rengoku.mastery.Level(), rengoku.mastery.xp), fy + 84, 14, C(255, 150, 55));
+    else
+        CText(TextFormat("RENGOKU MASTERY  LV %d  -  %d xp  (next level at %d - burn bright)",
+              rengoku.mastery.Level(), rengoku.mastery.xp, rnxt), fy + 84, 14, C(255, 150, 55));
 }
 
 void Game::DrawOverlays() const {
@@ -941,11 +1226,12 @@ void Game::DrawOverlays() const {
         CText("M MIST - vanish, blink, ambush from the fog", 420, 15, C(185, 195, 215));
         CText("G - summon GIYU TOMIOKA, the Water Hashira. if he falls, he is gone for the run", 446, 15, C(120, 190, 255));
         CText("B - summon SHINOBU KOCHO, the Insect Hashira. poison, triage, and wisteria", 472, 15, C(190, 150, 255));
-        CText("Clear waves to earn points - press TAB in battle to upgrade your styles", 502, 16, C(255, 215, 120));
-        CText("P - pause      F11 - fullscreen", 532, 14, C(150, 150, 165));
+        CText("R - summon KYOJURO RENGOKU, the Flame Hashira. burst damage and openings", 498, 15, C(255, 150, 55));
+        CText("Clear waves to earn points - press TAB in battle to upgrade your styles", 528, 16, C(255, 215, 120));
+        CText("P - pause      F11 - fullscreen", 558, 14, C(150, 150, 165));
 
         if (fmodf(gt, 1.2f) < 0.75f)
-            CText("PRESS  ENTER  TO  BEGIN", 570, 26, C(240, 210, 130));
+            CText("PRESS  ENTER  TO  BEGIN", 610, 26, C(240, 210, 130));
     }
     else if (state == GState::Playing && bannerT > 0 && !boss.active) {
         float a = Clampf(bannerT / 0.5f, 0, 1);
@@ -1054,6 +1340,7 @@ void Game::Draw() {
     kokushibo.Draw();
     giyu.Draw();
     shinobu.Draw();
+    rengoku.Draw();
     if (state != GState::Title) player.Draw();
     fx.DrawWorld();
     fx.DrawTexts();

@@ -2,7 +2,7 @@
 // ---------------------------------------------------------------
 // companion.h — Giyu Tomioka, the Water Hashira
 //
-// Summon with G. He fights beside you for a limited time, then
+// Summon with G. He fights beside you until the encounter ends, then
 // withdraws. If his health reaches zero HE FALLS FOR THE RUN —
 // no more summons until a new game. Mastery persists ACROSS runs
 // (giyu_mastery.txt): using him well levels him from a wary ally
@@ -35,6 +35,7 @@ struct GiyuMastery {
     float DmgMult() const     { return 1.0f + 0.10f * Level(); }
     float DmgTaken() const    { return 1.0f - 0.05f * Level(); }
     float Cadence() const     { return 1.15f - 0.07f * Level(); }    // time between forms
+    float DeadCalmShield() const { return 18.0f + 10.0f * Level(); }
     bool  HasDeadCalm() const { return Level() >= 5; }               // Eleventh Form
 
     void Load();
@@ -56,6 +57,7 @@ public:
     void ResetRun();                  // new game: he may be summoned again
     bool CanSummon() const;
     void Summon(Vector2 playerPos, Effects& fx);
+    void BeginWithdraw(Effects& fx);
     // moon: the currently active Upper Moon (Douma/Kokushibo), or null
     void Update(float dt, Player& player, std::vector<Enemy>& enemies,
                 Boss& boss, Akaza& akaza, UpperMoon* moon,
@@ -66,7 +68,8 @@ public:
     // pierce even Dead Calm, and send him flying.
     void TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx);
     bool Active() const {
-        return state != GiyuState::Inactive && state != GiyuState::Fallen;
+        return state != GiyuState::Inactive && state != GiyuState::Withdraw &&
+               state != GiyuState::Fallen;
     }
 
     GiyuMastery mastery;
@@ -94,7 +97,10 @@ private:
     int   tideHits = 0;
     float hitFlash = 0, iframes = 0;
     float staggerT = 0;               // knocked flying by the Demon King
+    float deadCalmShield = 0, deadCalmShieldMax = 0;
+    bool  ultDangerLast = false;
     Vector2 targetPos{};
     bool  targetIsBoss = false;
     bool  onGround = false;
+    int   exitDir = -1;
 };

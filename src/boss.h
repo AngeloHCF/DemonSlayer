@@ -17,6 +17,7 @@ class Effects;
 class Player;
 class Giyu;
 class Shinobu;
+class Rengoku;
 
 enum class BState {
     Inactive, Intro, Stalk,
@@ -49,8 +50,8 @@ public:
     void Activate(Vector2 p);
     // summonRequest: set to the number of demons the game should spawn this frame
     // ally: Giyu, whom Muzan will also hunt and strike (may be null/inactive)
-    void Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, CombatSystem& cs,
-                Effects& fx, int& summonRequest);
+    void Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
+                Rengoku* rengoku, CombatSystem& cs, Effects& fx, int& summonRequest);
     void Draw() const;
     Rectangle Rect() const;
     void TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx);
@@ -59,6 +60,9 @@ public:
     bool ForceOpening(Effects& fx);
     // Dead Calm: erase blood crescents near a point; returns how many were cut
     int  NullifyCrescents(Vector2 c, float r);
+    int  NullifyCrescentsInRect(Rectangle r);
+    int  NullifyRings(Vector2 c, float r);
+    int  NullifyRingsInRect(Rectangle r);
     int  CrescentsNear(Vector2 c, float r) const;
 
     bool Alive() const { return active && state != BState::Dead && state != BState::Dying; }
@@ -76,10 +80,12 @@ public:
     HitMemory hitMem;
 
 private:
-    void ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu);
+    void ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu,
+                      const Rengoku* rengoku);
     void EnterRecover(float t);
     bool preyAlly = false;        // current attack aimed at Giyu instead of the player
     bool preyShinobu = false;     // current attack aimed at Shinobu instead of the player
+    bool preyRengoku = false;     // current attack aimed at Rengoku instead of the player
 
     float stateTimer = 0;
     float decideTimer = 0;

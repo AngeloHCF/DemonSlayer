@@ -14,6 +14,7 @@
 #include "styles.h"
 #include "companion.h"
 #include "shinobu.h"
+#include "rengoku.h"
 #include <vector>
 
 enum class GState { Title, Playing, Upgrade, BossIntro, Paused, Victory, GameOver };
@@ -30,6 +31,7 @@ public:
     void Draw();
     // jump: 0 waves (--demo), 1 Akaza, 2 Muzan, 3 Douma, 4 Kokushibo
     void DebugStart(int jump);
+    void UnlockAllForTesting();
 
     bool quit = false;       // set when the player asks to leave
 
@@ -42,6 +44,13 @@ private:
     void UpdateUpgradeMenu();
     void ResolveCombat();
     void SeparateEnemies(float dt);
+    int  HashiraLimit() const;
+    int  ActiveHashiraCount() const;
+    int  HashiraSlotsUsed() const;
+    bool TrySummonHashira(int which);
+    void AutoSummonMuzanHashira();
+    void EndHashiraEncounter();
+    void UpdateHashiraWithdrawals(float dt);
 
     void DrawBackground() const;
     void DrawUI() const;
@@ -61,6 +70,8 @@ private:
     Progression prog;
     Giyu giyu;
     Shinobu shinobu;
+    Rengoku rengoku;
+    bool  giyuCommitted = false, shinobuCommitted = false, rengokuCommitted = false;
 
     int   selRow = 0, selCol = 0;   // upgrade menu cursor
     // the night's gauntlet: waves -> Akaza -> waves -> Douma -> waves

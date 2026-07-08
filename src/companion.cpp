@@ -14,6 +14,13 @@
 static const char* SAVE_FILE = "giyu_mastery.txt";
 static const int XP_TH[5] = { 20, 50, 90, 140, 200 };
 
+static bool UltimateDanger(const Boss& boss, const Akaza& akaza, const UpperMoon* moon) {
+    return (boss.Alive() && boss.state == BState::Desperation) ||
+           (akaza.Alive() && akaza.state == AkState::Desperation) ||
+           (moon && moon->Alive() && moon->kind == MOON_KOKU &&
+            moon->state == MState::Desperation);
+}
+
 // ---------------------------------------------------------------- mastery
 
 int GiyuMastery::Level() const {
@@ -49,7 +56,7 @@ void Giyu::ResetRun() {
     state = GiyuState::Inactive;
     fallen = false;
     summonedThisRun = false;
-    summonCd = 6.0f;                 // brief warm-up at the start of a run
+    summonCd = 0;
     activeT = 0;
     hp = maxHp = mastery.MaxHp();
     pos = { -100, cfg::GROUND_Y - 40 };
@@ -58,6 +65,9 @@ void Giyu::ResetRun() {
     stateTimer = attackTimer = 0;
     whirlCd = wheelCd = deadCalmCd = 0;
     hitFlash = iframes = 0;
+    deadCalmShield = deadCalmShieldMax = 0;
+    ultDangerLast = false;
+    exitDir = -1;
 }
 
 bool Giyu::CanSummon() const {
@@ -70,21 +80,43 @@ void Giyu::Summon(Vector2 playerPos, Effects& fx) {
     summonedThisRun = true;
     mastery.summons++;
     maxHp = mastery.MaxHp();
-    hp = maxHp;
+    if (hp <= 0) hp = maxHp;
+    hp = fminf(hp, maxHp);
     activeT = mastery.Duration();
     hitMem.Clear();
     whirlCd = wheelCd = 0;
     deadCalmCd = 5.0f;
+    deadCalmShield = deadCalmShieldMax = 0;
+    ultDangerLast = false;
     attackTimer = 0.4f;
     // he arrives from the nearest edge, cutting through the dark
     bool fromLeft = playerPos.x > cfg::SCREEN_W * 0.5f;
     pos = { fromLeft ? -60.0f : cfg::SCREEN_W + 60.0f, cfg::GROUND_Y - h * 0.5f };
     facing = fromLeft ? 1 : -1;
+    exitDir = fromLeft ? -1 : 1;
     targetPos = { playerPos.x - facing * 95.0f, playerPos.y };
     iframes = 1.0f;
     fx.Text({ playerPos.x, playerPos.y - 110 }, C(120, 190, 255), 1.5f, "GIYU TOMIOKA");
     PlaySfx(SFX_WATER, 1.0f, 0.8f);
     PlaySfx(SFX_WHOOSH, 0.8f, 0.7f);
+}
+
+void Giyu::BeginWithdraw(Effects& fx) {
+    if (state == GiyuState::Inactive || state == GiyuState::Fallen ||
+        state == GiyuState::Withdraw) return;
+
+    state = GiyuState::Withdraw;
+    stateTimer = 0;
+    attackTimer = 0;
+    tickT = 0;
+    curId = -1;
+    deadCalmShield = deadCalmShieldMax = 0;
+    ultDangerLast = false;
+    hitMem.Clear();
+    facing = exitDir;
+    vel = { facing * 1200.0f, 0 };
+    iframes = 0.8f;
+    fx.Text({ pos.x, pos.y - h - 10 }, C(120, 190, 255), 0.9f, "GIYU WITHDRAWS");
 }
 
 Rectangle Giyu::Rect() const {
@@ -97,6 +129,13 @@ void Giyu::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
 
     bool bossHit = (kind == HitKind::BossDash || kind == HitKind::BossAoe ||
                     kind == HitKind::BossProjectile);
+    if (state == GiyuState::DeadCalm && deadCalmShield > 0) {
+        deadCalmShield -= bossHit ? 8.0f : 3.0f;
+        fx.Ring(pos, 18, 90, 420, 5, C(180, 225, 255));
+        if (deadCalmShield <= 0)
+            fx.Text({ pos.x, pos.y - h - 12 }, C(180, 225, 255), 0.9f, "dead calm breaks");
+        return;
+    }
     // Dead Calm nullifies lesser attacks — but the Demon King's own blows land
     if (state == GiyuState::DeadCalm && !bossHit) return;
 
@@ -197,6 +236,8 @@ void Giyu::PickAction(Player& player, std::vector<Enemy>& enemies,
             state = GiyuState::DeadCalm;
             stateTimer = 2.0f;
             tickT = 0;
+            deadCalmShieldMax = mastery.DeadCalmShield();
+            deadCalmShield = deadCalmShieldMax;
             deadCalmCd = 20.0f;
             vel.x = 0;
             fx.Text({ pos.x, pos.y - h - 12 }, C(180, 225, 255), 1.2f, "ELEVENTH FORM: DEAD CALM");
@@ -286,16 +327,24 @@ void Giyu::Update(float dt, Player& player, std::vector<Enemy>& enemies,
     wheelCd = fmaxf(wheelCd - dt, 0);
     deadCalmCd = fmaxf(deadCalmCd - dt, 0);
 
-    // duty ends: withdraw before the demons wear him down
-    if (state != GiyuState::Withdraw && state != GiyuState::Arrive) {
-        activeT -= dt;
-        if (activeT <= 0) {
-            state = GiyuState::Withdraw;
-            facing = pos.x < cfg::SCREEN_W * 0.5f ? -1 : 1;
-            fx.Text({ pos.x, pos.y - h - 10 }, C(150, 190, 230), 1.0f, "giyu withdraws");
-            PlaySfx(SFX_WHOOSH, 0.6f, 0.8f);
-        }
+    bool ultDanger = UltimateDanger(boss, akaza, moon);
+    if (ultDanger && !ultDangerLast &&
+        state != GiyuState::Arrive && state != GiyuState::Withdraw) {
+        state = GiyuState::DeadCalm;
+        stateTimer = 1.75f + 0.12f * mastery.Level();
+        tickT = 0;
+        deadCalmShieldMax = mastery.DeadCalmShield();
+        deadCalmShield = deadCalmShieldMax;
+        deadCalmCd = fmaxf(deadCalmCd, 6.0f);
+        activeT = fmaxf(activeT, stateTimer + 0.4f);
+        vel.x = 0;
+        iframes = fmaxf(iframes, 0.45f);
+        fx.Text({ pos.x, pos.y - h - 16 }, C(180, 225, 255), 1.25f,
+                "DEAD CALM: ULTIMATE GUARD");
+        fx.Ring(pos, 20, 190, 520, 8, C(180, 225, 255));
+        PlaySfx(SFX_MIST, 1.0f, 0.65f);
     }
+    ultDangerLast = ultDanger;
 
     float dmgMul = mastery.DmgMult();
 
@@ -408,30 +457,43 @@ void Giyu::Update(float dt, Player& player, std::vector<Enemy>& enemies,
             tickT -= dt;
             vel.x = 0;
             // every hostile thing near him simply... stops.
+            int stopped = 0;
+            float calmR = 150.0f + 10.0f * mastery.Level();
+            float allyR = 130.0f + 8.0f * mastery.Level();
             for (auto& hb : cs.Boxes()) {
                 if (hb.team != Team::Enemy) continue;
                 Vector2 c = { hb.rect.x + hb.rect.width * 0.5f,
                               hb.rect.y + hb.rect.height * 0.5f };
-                if (Dist(c, pos) < 150) {
+                if (Dist(c, pos) < calmR) {
                     hb.life = 0;
+                    stopped += 2;
                     fx.Ring(c, 4, 40, 300, 3, C(190, 230, 255));
                 }
             }
-            int cut = boss.NullifyCrescents(pos, 150);
-            cut += boss.NullifyCrescents(player.pos, 130);
-            cut += akaza.NullifyOrbs(pos, 150);
-            cut += akaza.NullifyOrbs(player.pos, 130);
+            int cut = boss.NullifyCrescents(pos, calmR);
+            cut += boss.NullifyCrescents(player.pos, allyR);
+            cut += boss.NullifyRings(pos, calmR);
+            cut += boss.NullifyRings(player.pos, allyR);
+            cut += akaza.NullifyOrbs(pos, calmR);
+            cut += akaza.NullifyOrbs(player.pos, allyR);
             if (moon) {
-                cut += moon->NullifyShards(pos, 150);
-                cut += moon->NullifyShards(player.pos, 130);
+                cut += moon->NullifyShards(pos, calmR);
+                cut += moon->NullifyShards(player.pos, allyR);
             }
+            stopped += cut;
+            deadCalmShield -= stopped;
             if (cut > 0) PlaySfx(SFX_SLASH, 0.5f, 1.3f);
             if (tickT <= 0) {
                 tickT = 0.4f;
-                Rectangle r = { pos.x - 140, pos.y - 70, 280, 140 };
+                Rectangle r = { pos.x - calmR + 10, pos.y - 70, calmR * 2 - 20, 140 };
                 cs.Add(r, 3.0f * dmgMul, 0, -60, 0.03f,
                        Team::Player, HitKind::Giyu, cs.NewId());
-                fx.Ring(pos, 30, 150, 320, 4, C(180, 225, 255));
+                fx.Ring(pos, 30, calmR, 320, 4, C(180, 225, 255));
+            }
+            if (deadCalmShield <= 0) {
+                fx.Text({ pos.x, pos.y - h - 12 }, C(180, 225, 255), 0.9f,
+                        "dead calm breaks");
+                stateTimer = 0;
             }
             if (stateTimer <= 0) state = GiyuState::Follow;
             break;
@@ -441,9 +503,9 @@ void Giyu::Update(float dt, Player& player, std::vector<Enemy>& enemies,
             fx.WaterTrail(pos, facing);
             if (pos.x < -70 || pos.x > cfg::SCREEN_W + 70) {
                 state = GiyuState::Inactive;
-                summonCd = mastery.SummonCd();
-                mastery.xp += 5;                             // a duty fulfilled
-                mastery.Save();
+                summonCd = 0;
+                vel = { 0, 0 };
+                hitMem.Clear();
             }
             break;
         }
@@ -534,6 +596,12 @@ void Giyu::Draw() const {
         float p = fmodf(gt * 1.4f, 1.0f);
         DrawRing(pos, 140 * p, 140 * p + 3, 0, 360, 40, Fade(C(180, 225, 255), 0.5f * (1 - p)));
         DrawRing(pos, 60, 63, 0, 360, 32, Fade(C(180, 225, 255), 0.25f + 0.1f * sinf(gt * 6)));
+        if (deadCalmShieldMax > 0) {
+            float f = Clampf(deadCalmShield / deadCalmShieldMax, 0, 1);
+            DrawRectangle((int)(pos.x - 30), (int)(pos.y - h * 0.5f - 38), 60, 4, C(18, 22, 32));
+            DrawRectangle((int)(pos.x - 29), (int)(pos.y - h * 0.5f - 37),
+                          (int)(58 * f), 2, C(180, 225, 255));
+        }
     }
 
     // hp bar (blue, only when hurt)
@@ -544,9 +612,9 @@ void Giyu::Draw() const {
         DrawRectangle((int)(pos.x - bw * 0.5f + 1), (int)(pos.y - h * 0.5f - 15),
                       (int)((bw - 2) * f), 3, C(100, 175, 255));
     }
-    // active-time ring above his head
+    // health ring above his head
     if (Active() && state != GiyuState::Withdraw) {
-        float f = Clampf(activeT / mastery.Duration(), 0, 1);
+        float f = Clampf(hp / maxHp, 0, 1);
         DrawRing({ pos.x, pos.y - h * 0.5f - 26 }, 5, 8, -90, -90 + 360 * f, 24,
                  Fade(C(120, 190, 255), 0.8f));
     }

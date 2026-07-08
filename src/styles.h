@@ -26,12 +26,22 @@ struct StyleUpgrades {
 
 class Progression {
 public:
-    int points = 100;
+    int points = 0;
     StyleUpgrades up[STYLE_COUNT];
 
     void Reset() {
-        points = 100;
+        points = 0;
         for (int i = 0; i < STYLE_COUNT; i++) up[i] = StyleUpgrades{};
+    }
+
+    void UnlockAll() {
+        points = 100;
+        for (int i = 0; i < STYLE_COUNT; i++) {
+            up[i].power = 3;
+            up[i].flow = 3;
+            up[i].reach = 3;
+            up[i].mastery = true;
+        }
     }
 
     float DmgMult(int s) const   { return 1.0f + 0.30f * up[s].power; }

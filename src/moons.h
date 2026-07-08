@@ -18,6 +18,7 @@ class Effects;
 class Player;
 class Giyu;
 class Shinobu;
+class Rengoku;
 
 enum MoonKind { MOON_DOUMA = 0, MOON_KOKU = 1 };
 
@@ -49,7 +50,7 @@ public:
 
     void Reset();
     void Activate(Vector2 p);
-    void Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
+    void Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Rengoku* rengoku,
                 CombatSystem& cs, Effects& fx);
     void Draw() const;
     Rectangle Rect() const;
@@ -61,6 +62,7 @@ public:
     // Giyu support hooks
     bool ForceOpening(Effects& fx);
     int  NullifyShards(Vector2 c, float r);
+    int  NullifyShardsInRect(Rectangle r);
     int  ShardsNear(Vector2 c, float r) const;
     bool Menacing(Vector2 a, Vector2 b) const;   // Dead Calm trigger
 
@@ -77,7 +79,8 @@ public:
     HitMemory hitMem;
 
 private:
-    void ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu);
+    void ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu,
+                      const Rengoku* rengoku);
     void EnterRecover(float t);
 
     float stateTimer = 0;
@@ -91,6 +94,7 @@ private:
     float ghostA = 1.0f;           // kokushibo flash-step fade
     bool  preyAlly = false;
     bool  preyShinobu = false;
+    bool  preyRengoku = false;
     std::vector<Shard> shards;
     std::vector<Lotus> lotus;
     Rectangle slashBand{};         // koku long-slash telegraph

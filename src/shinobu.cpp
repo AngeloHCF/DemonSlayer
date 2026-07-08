@@ -56,7 +56,7 @@ void Shinobu::ResetRun() {
     state = ShinobuState::Inactive;
     fallen = false;
     summonedThisRun = false;
-    summonCd = 8.0f;
+    summonCd = 0;
     activeT = 0;
     hp = maxHp = mastery.MaxHp();
     pos = { -120, cfg::GROUND_Y - 38 };
@@ -65,6 +65,7 @@ void Shinobu::ResetRun() {
     stateTimer = attackTimer = 0;
     hexCd = zigzagCd = wisteriaCd = healCd = 0;
     hitFlash = iframes = staggerT = 0;
+    exitDir = -1;
 }
 
 bool Shinobu::CanSummon() const {
@@ -77,7 +78,8 @@ void Shinobu::Summon(Vector2 playerPos, Effects& fx) {
     summonedThisRun = true;
     mastery.summons++;
     maxHp = mastery.MaxHp();
-    hp = maxHp;
+    if (hp <= 0) hp = maxHp;
+    hp = fminf(hp, maxHp);
     activeT = mastery.Duration();
     hitMem.Clear();
     hexCd = zigzagCd = 0;
@@ -87,11 +89,29 @@ void Shinobu::Summon(Vector2 playerPos, Effects& fx) {
     bool fromLeft = playerPos.x > cfg::SCREEN_W * 0.5f;
     pos = { fromLeft ? -50.0f : cfg::SCREEN_W + 50.0f, cfg::GROUND_Y - h * 0.5f };
     facing = fromLeft ? 1 : -1;
+    exitDir = fromLeft ? -1 : 1;
     targetPos = { playerPos.x - facing * 82.0f, playerPos.y };
     iframes = 1.0f;
     fx.Text({ playerPos.x, playerPos.y - 112 }, ShinobuCol(), 1.5f, "SHINOBU KOCHO");
     PlaySfx(SFX_SERPENT, 0.9f, 1.35f);
     PlaySfx(SFX_WHOOSH, 0.75f, 1.35f);
+}
+
+void Shinobu::BeginWithdraw(Effects& fx) {
+    if (state == ShinobuState::Inactive || state == ShinobuState::Fallen ||
+        state == ShinobuState::Withdraw) return;
+
+    state = ShinobuState::Withdraw;
+    stateTimer = 0;
+    attackTimer = 0;
+    tickT = 0;
+    formHits = 0;
+    curId = -1;
+    hitMem.Clear();
+    facing = exitDir;
+    vel = { facing * 1250.0f, 0 };
+    iframes = 0.8f;
+    fx.Text({ pos.x, pos.y - h - 10 }, ShinobuCol(), 0.9f, "SHINOBU WITHDRAWS");
 }
 
 Rectangle Shinobu::Rect() const {
@@ -291,16 +311,6 @@ void Shinobu::Update(float dt, Player& player, std::vector<Enemy>& enemies,
     wisteriaCd = fmaxf(wisteriaCd - dt, 0);
     healCd = fmaxf(healCd - dt, 0);
 
-    if (state != ShinobuState::Withdraw && state != ShinobuState::Arrive) {
-        activeT -= dt;
-        if (activeT <= 0) {
-            state = ShinobuState::Withdraw;
-            facing = pos.x < cfg::SCREEN_W * 0.5f ? -1 : 1;
-            fx.Text({ pos.x, pos.y - h - 10 }, ShinobuCol(), 1.0f, "shinobu withdraws");
-            PlaySfx(SFX_WHOOSH, 0.6f, 1.25f);
-        }
-    }
-
     float dmgMul = mastery.DmgMult();
 
     switch (state) {
@@ -460,9 +470,9 @@ void Shinobu::Update(float dt, Player& player, std::vector<Enemy>& enemies,
             InsectTrail(fx, pos, facing);
             if (pos.x < -70 || pos.x > cfg::SCREEN_W + 70) {
                 state = ShinobuState::Inactive;
-                summonCd = mastery.SummonCd();
-                mastery.xp += 5;
-                mastery.Save();
+                summonCd = 0;
+                vel = { 0, 0 };
+                hitMem.Clear();
             }
             break;
         }
@@ -570,7 +580,7 @@ void Shinobu::Draw() const {
                       (int)((bw - 2) * f), 3, ShinobuCol());
     }
     if (Active() && state != ShinobuState::Withdraw) {
-        float f = Clampf(activeT / mastery.Duration(), 0, 1);
+        float f = Clampf(hp / maxHp, 0, 1);
         DrawRing({ pos.x, pos.y - h * 0.5f - 25 }, 5, 8, -90, -90 + 360 * f, 24,
                  Fade(ShinobuCol(), 0.8f));
     }

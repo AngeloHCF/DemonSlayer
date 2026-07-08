@@ -11,7 +11,7 @@
 #include <vector>
 
 enum class Team    { Player, Enemy };
-enum class HitKind { Basic, Water, Fire, Stone, Love, Serpent, Wind, Giyu, Shinobu,
+enum class HitKind { Basic, Water, Fire, Stone, Love, Serpent, Wind, Giyu, Shinobu, Rengoku,
                      EnemyMelee, BossDash, BossAoe, BossProjectile };
 
 struct Hitbox {

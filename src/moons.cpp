@@ -2,6 +2,7 @@
 #include "player.h"
 #include "companion.h"
 #include "shinobu.h"
+#include "rengoku.h"
 #include "effects.h"
 #include "config.h"
 #include "audio.h"
@@ -33,6 +34,7 @@ void UpperMoon::Reset() {
     ghostA = 1.0f;
     preyAlly = false;
     preyShinobu = false;
+    preyRengoku = false;
     shards.clear();
     lotus.clear();
     slashArmed = false;
@@ -57,23 +59,31 @@ void UpperMoon::EnterRecover(float t) {
     stateTimer = t;
 }
 
-void UpperMoon::ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu) {
+void UpperMoon::ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu,
+                             const Rengoku* rengoku) {
     preyAlly = false;
     preyShinobu = false;
+    preyRengoku = false;
     bool gActive = ally && ally->Active();
     bool sActive = shinobu && shinobu->Active();
-    if ((gActive || sActive) && GetRandomValue(0, 99) < 40) {
-        if (gActive && sActive) {
-            float dg = fabsf(ally->pos.x - pos.x);
-            float ds = fabsf(shinobu->pos.x - pos.x);
-            preyAlly = dg <= ds;
-            preyShinobu = !preyAlly;
-        } else {
-            preyAlly = gActive;
-            preyShinobu = sActive;
+    bool rActive = rengoku && rengoku->Active();
+    if ((gActive || sActive || rActive) && GetRandomValue(0, 99) < 40) {
+        float best = 1e9f;
+        if (gActive) {
+            best = fabsf(ally->pos.x - pos.x);
+            preyAlly = true;
+        }
+        if (sActive && fabsf(shinobu->pos.x - pos.x) < best) {
+            best = fabsf(shinobu->pos.x - pos.x);
+            preyAlly = false; preyShinobu = true; preyRengoku = false;
+        }
+        if (rActive && fabsf(rengoku->pos.x - pos.x) < best) {
+            preyAlly = false; preyShinobu = false; preyRengoku = true;
         }
     }
-    Vector2 prey = preyAlly ? ally->pos : (preyShinobu ? shinobu->pos : player.pos);
+    Vector2 prey = preyAlly ? ally->pos
+                 : (preyShinobu ? shinobu->pos
+                 : (preyRengoku ? rengoku->pos : player.pos));
     float dist = fabsf(prey.x - pos.x);
     int roll = GetRandomValue(0, 99);
 
@@ -101,7 +111,7 @@ void UpperMoon::ChooseAttack(const Player& player, const Giyu* ally, const Shino
     if (phase >= 2) stateTimer *= 0.75f;
 }
 
-void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
+void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Rengoku* rengoku,
                        CombatSystem& cs, Effects& fx) {
     if (!active || state == MState::Dead) return;
 
@@ -129,7 +139,7 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
         if (kind == MOON_KOKU) {
             // desperation: the strongest swordsman alive refuses the grave
             state = MState::Desperation;
-            stateTimer = 20.0f;
+            stateTimer = 9.4f;
             tickT = 0;
             vel.x = 0;
             slashArmed = false;
@@ -152,7 +162,10 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
 
     bool huntingAlly = preyAlly && ally && ally->Active();
     bool huntingShinobu = preyShinobu && shinobu && shinobu->Active();
-    Vector2 prey = huntingAlly ? ally->pos : (huntingShinobu ? shinobu->pos : player.pos);
+    bool huntingRengoku = preyRengoku && rengoku && rengoku->Active();
+    Vector2 prey = huntingAlly ? ally->pos
+                 : (huntingShinobu ? shinobu->pos
+                 : (huntingRengoku ? rengoku->pos : player.pos));
 
     switch (state) {
         case MState::Intro: {
@@ -176,7 +189,7 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
                 else
                     vel.x *= 1.0f - Clampf(6.0f * dt, 0, 1);
                 decideTimer -= dt;
-                if (decideTimer <= 0) ChooseAttack(player, ally, shinobu);
+                if (decideTimer <= 0) ChooseAttack(player, ally, shinobu, rengoku);
             }
             break;
         }
@@ -291,6 +304,11 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
                             float dir = shinobu->pos.x >= lz.pos.x ? 1.0f : -1.0f;
                             shinobu->TakeDamage(20, dir * 480.0f, HitKind::BossAoe, fx);
                         }
+                        if (rengoku && rengoku->Active() &&
+                            Dist(rengoku->pos, { lz.pos.x, lz.pos.y - 20 }) < 90) {
+                            float dir = rengoku->pos.x >= lz.pos.x ? 1.0f : -1.0f;
+                            rengoku->TakeDamage(20, dir * 480.0f, HitKind::BossAoe, fx);
+                        }
                     }
                 }
             }
@@ -349,6 +367,8 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
                         ally->TakeDamage(6, facing * 140.0f, HitKind::BossProjectile, fx);
                     if (shinobu && shinobu->Active() && CheckCollisionRecs(cone, shinobu->Rect()))
                         shinobu->TakeDamage(6, facing * 140.0f, HitKind::BossProjectile, fx);
+                    if (rengoku && rengoku->Active() && CheckCollisionRecs(cone, rengoku->Rect()))
+                        rengoku->TakeDamage(6, facing * 140.0f, HitKind::BossProjectile, fx);
                 }
                 if (stateTimer <= 0) EnterRecover(phase >= 2 ? 0.7f : 0.95f);
             } else {
@@ -449,6 +469,12 @@ void UpperMoon::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
                                 HitKind::BossProjectile, fx);
             s.alive = false;
         }
+        if (s.alive && rengoku && rengoku->Active() &&
+            CheckCollisionCircleRec(s.pos, 12, rengoku->Rect())) {
+            rengoku->TakeDamage(shardDmg, (s.vel.x > 0 ? 1 : -1) * 320.0f,
+                                HitKind::BossProjectile, fx);
+            s.alive = false;
+        }
         if (s.pos.x < -60 || s.pos.x > cfg::SCREEN_W + 60 ||
             s.pos.y < -60 || s.pos.y > cfg::SCREEN_H + 60)
             s.alive = false;
@@ -480,6 +506,7 @@ void UpperMoon::TakeDamage(float dmg, float kbx, HitKind kindHit, Effects& fx) {
 
     float mult = (vulnerable || guardBroken > 0) ? 1.0f : MoonGuard(kind);
     if (kindHit == HitKind::Fire && vulnerable) mult = 1.4f;
+    if (kindHit == HitKind::Rengoku && vulnerable) mult *= 1.2f;
     if (kindHit == HitKind::Water) slowTimer = 1.4f;
     if (kindHit == HitKind::Serpent) poisonT = 3.0f;
     if (kindHit == HitKind::Giyu) mult *= 0.3f;   // Hashira alone cannot fell an Upper Moon
@@ -487,6 +514,7 @@ void UpperMoon::TakeDamage(float dmg, float kbx, HitKind kindHit, Effects& fx) {
         mult *= 0.25f;
         poisonT = fmaxf(poisonT, 4.5f);
     }
+    if (kindHit == HitKind::Rengoku) mult *= 0.36f;
     if (kindHit == HitKind::Stone && guardBroken <= 0) {
         guardBroken = 4.0f;
         fx.Text({ pos.x, pos.y - h * 0.5f - 34 }, C(210, 200, 185), 1.2f, "GUARD BROKEN");
@@ -505,6 +533,7 @@ void UpperMoon::TakeDamage(float dmg, float kbx, HitKind kindHit, Effects& fx) {
     if (kindHit == HitKind::Wind)    tcol = C(215, 245, 230);
     if (kindHit == HitKind::Giyu)    tcol = C(120, 190, 255);
     if (kindHit == HitKind::Shinobu) tcol = C(190, 150, 255);
+    if (kindHit == HitKind::Rengoku) tcol = C(255, 150, 55);
     fx.Text({ pos.x, pos.y - h * 0.5f - 16 }, tcol,
             (vulnerable || guardBroken > 0) ? 1.25f : 0.95f, "%.0f", dealt);
     fx.HitSparks({ pos.x, pos.y - 10 }, kbx >= 0 ? 1 : -1, tcol);
@@ -541,6 +570,17 @@ int UpperMoon::NullifyShards(Vector2 c, float r) {
     int cut = 0;
     for (auto& s : shards)
         if (s.alive && Dist(s.pos, c) < r) { s.alive = false; cut++; }
+    return cut;
+}
+
+int UpperMoon::NullifyShardsInRect(Rectangle r) {
+    int cut = 0;
+    for (auto& s : shards) {
+        if (s.alive && CheckCollisionPointRec(s.pos, r)) {
+            s.alive = false;
+            cut++;
+        }
+    }
     return cut;
 }
 

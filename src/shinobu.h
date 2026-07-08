@@ -53,6 +53,7 @@ public:
     void ResetRun();
     bool CanSummon() const;
     void Summon(Vector2 playerPos, Effects& fx);
+    void BeginWithdraw(Effects& fx);
     void Update(float dt, Player& player, std::vector<Enemy>& enemies,
                 Boss& boss, Akaza& akaza, UpperMoon* moon,
                 CombatSystem& cs, Effects& fx);
@@ -60,7 +61,8 @@ public:
     Rectangle Rect() const;
     void TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx);
     bool Active() const {
-        return state != ShinobuState::Inactive && state != ShinobuState::Fallen;
+        return state != ShinobuState::Inactive && state != ShinobuState::Withdraw &&
+               state != ShinobuState::Fallen;
     }
 
     ShinobuMastery mastery;
@@ -91,4 +93,5 @@ private:
     Vector2 targetPos{};
     bool  targetIsBoss = false;
     bool  onGround = false;
+    int   exitDir = -1;
 };
