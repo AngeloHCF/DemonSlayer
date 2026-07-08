@@ -3,6 +3,8 @@
 #include "companion.h"
 #include "shinobu.h"
 #include "rengoku.h"
+#include "gyomei.h"
+#include "tengen.h"
 #include "effects.h"
 #include "config.h"
 #include "audio.h"
@@ -32,6 +34,8 @@ void Akaza::Reset() {
     preyAlly = false;
     preyShinobu = false;
     preyRengoku = false;
+    preyGyomei = false;
+    preyTengen = false;
     leapVx = 0;
     orbs.clear();
     waves.clear();
@@ -57,15 +61,19 @@ void Akaza::EnterRecover(float t) {
 }
 
 void Akaza::ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu,
-                         const Rengoku* rengoku) {
+                         const Rengoku* rengoku, const Gyomei* gyomei, const Tengen* tengen) {
     // he seeks the strong - and a Hashira is a feast
     preyAlly = false;
     preyShinobu = false;
     preyRengoku = false;
+    preyGyomei = false;
+    preyTengen = false;
     bool gActive = ally && ally->Active();
     bool sActive = shinobu && shinobu->Active();
     bool rActive = rengoku && rengoku->Active();
-    if ((gActive || sActive || rActive) && GetRandomValue(0, 99) < 45) {
+    bool yActive = gyomei && gyomei->Active();
+    bool tActive = tengen && tengen->Active();
+    if ((gActive || sActive || rActive || yActive || tActive) && GetRandomValue(0, 99) < 45) {
         float best = 1e9f;
         if (gActive) {
             best = fabsf(ally->pos.x - pos.x);
@@ -76,12 +84,22 @@ void Akaza::ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* 
             preyAlly = false; preyShinobu = true; preyRengoku = false;
         }
         if (rActive && fabsf(rengoku->pos.x - pos.x) < best) {
-            preyAlly = false; preyShinobu = false; preyRengoku = true;
+            best = fabsf(rengoku->pos.x - pos.x);
+            preyAlly = false; preyShinobu = false; preyRengoku = true; preyGyomei = false;
+        }
+        if (yActive && fabsf(gyomei->pos.x - pos.x) < best) {
+            best = fabsf(gyomei->pos.x - pos.x);
+            preyAlly = false; preyShinobu = false; preyRengoku = false; preyGyomei = true; preyTengen = false;
+        }
+        if (tActive && fabsf(tengen->pos.x - pos.x) < best) {
+            preyAlly = false; preyShinobu = false; preyRengoku = false; preyGyomei = false; preyTengen = true;
         }
     }
     Vector2 prey = preyAlly ? ally->pos
                  : (preyShinobu ? shinobu->pos
-                 : (preyRengoku ? rengoku->pos : player.pos));
+                 : (preyRengoku ? rengoku->pos
+                 : (preyGyomei ? gyomei->pos
+                 : (preyTengen ? tengen->pos : player.pos))));
     float dist = fabsf(prey.x - pos.x);
     int roll = GetRandomValue(0, 99);
 
@@ -105,7 +123,8 @@ void Akaza::ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* 
     if (phase >= 2) stateTimer *= 0.72f;    // he rejoices in battle
 }
 
-void Akaza::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Rengoku* rengoku,
+void Akaza::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
+                   Rengoku* rengoku, Gyomei* gyomei, Tengen* tengen,
                    CombatSystem& cs, Effects& fx) {
     if (!active || state == AkState::Dead) return;
 
@@ -150,9 +169,13 @@ void Akaza::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Rengo
     bool huntingAlly = preyAlly && ally && ally->Active();
     bool huntingShinobu = preyShinobu && shinobu && shinobu->Active();
     bool huntingRengoku = preyRengoku && rengoku && rengoku->Active();
+    bool huntingGyomei = preyGyomei && gyomei && gyomei->Active();
+    bool huntingTengen = preyTengen && tengen && tengen->Active();
     Vector2 prey = huntingAlly ? ally->pos
                  : (huntingShinobu ? shinobu->pos
-                 : (huntingRengoku ? rengoku->pos : player.pos));
+                 : (huntingRengoku ? rengoku->pos
+                 : (huntingGyomei ? gyomei->pos
+                 : (huntingTengen ? tengen->pos : player.pos))));
 
     switch (state) {
         case AkState::Intro: {
@@ -181,7 +204,7 @@ void Akaza::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Rengo
                 if (fabsf(dx) > 120) vel.x = facing * spd;
                 else vel.x *= 1.0f - Clampf(7.0f * dt, 0, 1);
                 decideTimer -= dt;
-                if (decideTimer <= 0) ChooseAttack(player, ally, shinobu, rengoku);
+                if (decideTimer <= 0) ChooseAttack(player, ally, shinobu, rengoku, gyomei, tengen);
             }
             break;
         }
@@ -312,6 +335,22 @@ void Akaza::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Rengo
                             rengoku->TakeDamage(18, dir * 520.0f, HitKind::BossAoe, fx);
                         }
                     }
+                    if (!wv.hitAlly && gyomei && gyomei->Active()) {
+                        float d = Dist(gyomei->pos, wv.center);
+                        if (fabsf(d - wv.r) < 28 && gyomei->pos.y > cfg::GROUND_Y - 120) {
+                            wv.hitAlly = true;
+                            float dir = gyomei->pos.x >= wv.center.x ? 1.0f : -1.0f;
+                            gyomei->TakeDamage(18, dir * 520.0f, HitKind::BossAoe, fx);
+                        }
+                    }
+                    if (!wv.hitAlly && tengen && tengen->Active()) {
+                        float d = Dist(tengen->pos, wv.center);
+                        if (fabsf(d - wv.r) < 28 && tengen->pos.y > cfg::GROUND_Y - 120) {
+                            wv.hitAlly = true;
+                            float dir = tengen->pos.x >= wv.center.x ? 1.0f : -1.0f;
+                            tengen->TakeDamage(18, dir * 520.0f, HitKind::BossAoe, fx);
+                        }
+                    }
                 }
             }
             if (stateTimer <= 0) {
@@ -437,6 +476,18 @@ void Akaza::Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Rengo
                                 HitKind::BossProjectile, fx);
             o.alive = false;
         }
+        if (o.alive && gyomei && gyomei->Active() &&
+            CheckCollisionCircleRec(o.pos, 11, gyomei->Rect())) {
+            gyomei->TakeDamage(orbDmg, (o.vel.x > 0 ? 1 : -1) * 300.0f,
+                               HitKind::BossProjectile, fx);
+            o.alive = false;
+        }
+        if (o.alive && tengen && tengen->Active() &&
+            CheckCollisionCircleRec(o.pos, 11, tengen->Rect())) {
+            tengen->TakeDamage(orbDmg, (o.vel.x > 0 ? 1 : -1) * 300.0f,
+                               HitKind::BossProjectile, fx);
+            o.alive = false;
+        }
         if (o.pos.x < -60 || o.pos.x > cfg::SCREEN_W + 60 ||
             o.pos.y < -60 || o.pos.y > cfg::SCREEN_H + 60)
             o.alive = false;
@@ -478,6 +529,16 @@ void Akaza::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
         poisonT = fmaxf(poisonT, 4.5f);
     }
     if (kind == HitKind::Rengoku) mult *= 0.42f;
+    if (kind == HitKind::Gyomei) {
+        mult *= 0.50f;
+        if (guardBroken <= 0) {
+            guardBroken = 3.4f;
+            fx.Text({ pos.x, pos.y - h * 0.5f - 34 }, C(210, 200, 185), 1.2f,
+                    "STONE HASHIRA BREAKS GUARD");
+            fx.Ring(pos, 18, 145, 500, 8, C(210, 200, 185));
+        }
+    }
+    if (kind == HitKind::Tengen) mult *= 0.40f;
     if (kind == HitKind::Stone && guardBroken <= 0) {
         guardBroken = 4.0f;
         fx.Text({ pos.x, pos.y - h * 0.5f - 34 }, C(210, 200, 185), 1.2f, "GUARD BROKEN");
@@ -497,6 +558,8 @@ void Akaza::TakeDamage(float dmg, float kbx, HitKind kind, Effects& fx) {
     if (kind == HitKind::Giyu)    tcol = C(120, 190, 255);
     if (kind == HitKind::Shinobu) tcol = C(190, 150, 255);
     if (kind == HitKind::Rengoku) tcol = C(255, 150, 55);
+    if (kind == HitKind::Gyomei)  tcol = C(188, 178, 158);
+    if (kind == HitKind::Tengen)  tcol = C(255, 212, 88);
     fx.Text({ pos.x, pos.y - h * 0.5f - 16 }, tcol,
             (vulnerable || guardBroken > 0) ? 1.25f : 0.95f, "%.0f", dealt);
     fx.HitSparks({ pos.x, pos.y - 10 }, kbx >= 0 ? 1 : -1, tcol);

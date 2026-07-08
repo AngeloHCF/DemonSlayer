@@ -9,6 +9,8 @@
 | **G** | Summon **Giyu Tomioka**, the Water Hashira |
 | **B** | Summon **Shinobu Kocho**, the Insect Hashira |
 | **R** | Summon **Kyojuro Rengoku**, the Flame Hashira |
+| **Y** | Summon **Gyomei Himejima**, the Stone Hashira |
+| **T** | Summon **Tengen Uzui**, the Sound Hashira |
 | A / D or ← / → | Move |
 | W / ↑ / Space | Jump |
 | **Left Shift** (hold) | **Crouch** — slower steps, lowered hurtbox (duck under crescents and fist orbs) |
@@ -55,6 +57,26 @@ Press **R** to summon Rengoku as explosive support. He is the burst-damage ally:
 - **Ultimate guard:** when Akaza, Kokushibo, or Muzan enters a desperation ultimate, active Rengoku raises **Flaming Wall** in front of him. The wall burns away projectiles, hostile hitboxes, and blast rings until its shield health is spent.
 - **If Rengoku falls, he is gone for the rest of the run.**
 - **Mastery persists across runs** (saved to `rengoku_mastery.txt` next to the exe): he earns XP from kills, openings, safe withdrawals, and victories. Each level increases Flaming Wall shield health.
+
+## Gyomei Himejima — the Stone Hashira
+
+Press **Y** to summon Gyomei as the frontline defender. He is the slowest Hashira, but has the highest health, strongest defense, and the heaviest raw hits. His chained axe and spiked flail cover close and medium range through **Serpentinite Bipolar**, **Upper Smash**, **Volcanic Rock: Rapid Conquest**, and the area-clearing ultimate **Arcs of Justice**.
+
+- **Stone Guard:** when a major boss barrage threatens the player, Gyomei plants himself and whips the axe and flail through incoming projectiles. The guard shatters blood crescents, fist orbs, moon shards, hostile hitboxes, and blast rings until its shield durability is spent.
+- **He is not fast.** He walks and attacks deliberately, with long cooldowns and commitment windows, but every impact creates shockwaves, dust, rock debris, heavy hitstop, and screen shake.
+- **He cannot solo the final bosses** despite being the strongest Hashira in raw force. Upper Moons and Muzan resist ally damage, but Gyomei's blows break guard and force openings.
+- **If Gyomei falls, he is gone for the rest of the run.**
+- **Mastery persists across runs** (saved to `gyomei_mastery.txt` next to the exe): he earns XP from kills, openings, safe withdrawals, and victories. Each level improves his health, defense, damage, and Stone Guard shield.
+
+## Tengen Uzui — the Sound Hashira
+
+Press **T** to summon Tengen as the flashy pressure Hashira. He is one of the fastest allies, constantly dashing, weaving, and chaining attacks with dual Nichirin cleavers linked by a chain. His Sound Breathing kit includes a fast light combo, **Chain Cleave**, **First Form: Roar Rush**, **Rising Beat**, **Fourth Form: Constant Resounding Slashes**, and the large-area ultimate **Musical Score: Flashy Finale**.
+
+- **Explosive Deflection:** when a major boss attack threatens the player, Tengen spins his chained blades into an aggressive defensive zone. Incoming crescents, fist orbs, moon shards, hostile hitboxes, and blast rings detonate on contact until the deflection durability is depleted.
+- **He is built for speed, not stillness.** His AI prioritizes clustered enemies, keeps moving around bosses, dodges heavy attacks, and uses wide sweeps and explosions to control space.
+- **He cannot solo the final bosses.** Upper Moons and Muzan resist ally damage, but Tengen's fast pressure can still force openings and clear swarms around the player.
+- **If Tengen falls, he is gone for the rest of the run.**
+- **Mastery persists across runs** (saved to `tengen_mastery.txt` next to the exe): he earns XP from kills, openings, safe withdrawals, and victories. Each level improves speed, health, damage, dodge reliability, and Explosive Deflection durability.
 
 ## Hashira summon rules
 
@@ -141,6 +163,8 @@ src/player.*    movement, combos, 7 breathing styles, tornadoes/zones/afterimage
 src/companion.* Giyu Tomioka: AI, Water Forms, permadeath, cross-run mastery
 src/shinobu.*   Shinobu Kocho: Insect Forms, poison support, triage, mastery
 src/rengoku.*   Kyojuro Rengoku: Flame Forms, burst support, mastery
+src/gyomei.*    Gyomei Himejima: Stone Forms, chained axe/flail, Stone Guard
+src/tengen.*    Tengen Uzui: Sound Forms, chained cleavers, Explosive Deflection
 src/enemy.*     demon tiers, swarm AI, armor break, poison, mist confusion
 src/akaza.*     Akaza (Upper Moon Three): fist combos, shockwaves, leap craters
 src/moons.*     Douma (ice, lotus, chill) and Kokushibo (moon arcs, long slashes)

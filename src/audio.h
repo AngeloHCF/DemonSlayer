@@ -21,6 +21,8 @@ enum Sfx {
     SFX_WIND,       // wind breathing gale
     SFX_MIST,       // mist breathing shimmer
     SFX_UPGRADE,    // upgrade purchased
+    SFX_CHAIN,      // Gyomei's chained axe and flail
+    SFX_SOUND,      // Tengen's explosive Sound Breathing
     SFX_COUNT
 };
 

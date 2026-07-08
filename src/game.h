@@ -15,6 +15,8 @@
 #include "companion.h"
 #include "shinobu.h"
 #include "rengoku.h"
+#include "gyomei.h"
+#include "tengen.h"
 #include <vector>
 
 enum class GState { Title, StyleSelect, Playing, Upgrade, BossIntro, Paused, Settings, Victory, GameOver };
@@ -83,7 +85,10 @@ private:
     Giyu giyu;
     Shinobu shinobu;
     Rengoku rengoku;
-    bool  giyuCommitted = false, shinobuCommitted = false, rengokuCommitted = false;
+    Gyomei gyomei;
+    Tengen tengen;
+    bool  giyuCommitted = false, shinobuCommitted = false, rengokuCommitted = false,
+          gyomeiCommitted = false, tengenCommitted = false;
 
     int   selRow = 0, selCol = 0;   // upgrade menu cursor
     int   pauseSel = 0;             // escape-menu cursor (0 resume, 1 settings, 2 quit)

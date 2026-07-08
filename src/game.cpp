@@ -63,6 +63,10 @@ void Game::Init() {
     shinobu.ResetRun();
     rengoku.mastery.Load();
     rengoku.ResetRun();
+    gyomei.mastery.Load();
+    gyomei.ResetRun();
+    tengen.mastery.Load();
+    tengen.ResetRun();
 }
 
 UpperMoon* Game::ActiveMoon() {
@@ -103,7 +107,7 @@ void Game::UnlockAllForTesting() {
 }
 
 int Game::HashiraLimit() const {
-    if (boss.active && !boss.Defeated()) return 3;          // Muzan: all surviving Hashira
+    if (boss.active && !boss.Defeated()) return 5;          // Muzan: all surviving Hashira
     if (kokushibo.active && !kokushibo.Defeated()) return 3;
     if (douma.active && !douma.Defeated()) return 2;
     return 1;                                               // normal waves and Akaza
@@ -114,6 +118,8 @@ int Game::ActiveHashiraCount() const {
     if (giyu.Active()) n++;
     if (shinobu.Active()) n++;
     if (rengoku.Active()) n++;
+    if (gyomei.Active()) n++;
+    if (tengen.Active()) n++;
     return n;
 }
 
@@ -122,6 +128,8 @@ int Game::HashiraSlotsUsed() const {
     if (giyuCommitted) n++;
     if (shinobuCommitted) n++;
     if (rengokuCommitted) n++;
+    if (gyomeiCommitted) n++;
+    if (tengenCommitted) n++;
     return n;
 }
 
@@ -179,7 +187,7 @@ bool Game::TrySummonHashira(int which) {
             shinobu.Summon(player.pos, fx);
             shinobuCommitted = true;
             return true;
-        default:
+        case 2:
             if (rengokuCommitted) {
                 fx.Text({ player.pos.x, player.pos.y - 122 }, C(255, 150, 55), 0.9f,
                         "rengoku is already committed");
@@ -198,6 +206,44 @@ bool Game::TrySummonHashira(int which) {
             rengoku.Summon(player.pos, fx);
             rengokuCommitted = true;
             return true;
+        case 3:
+            if (gyomeiCommitted) {
+                fx.Text({ player.pos.x, player.pos.y - 140 }, C(188, 178, 158), 0.9f,
+                        "gyomei is already committed");
+                return false;
+            }
+            if (gyomei.fallen) {
+                fx.Text({ player.pos.x, player.pos.y - 140 }, C(215, 70, 65), 1.0f,
+                        "GYOMEI HAS FALLEN THIS RUN");
+                return false;
+            }
+            if (gyomei.state != GyomeiState::Inactive) {
+                fx.Text({ player.pos.x, player.pos.y - 140 }, C(188, 178, 158), 0.9f,
+                        "gyomei is already deployed");
+                return false;
+            }
+            gyomei.Summon(player.pos, fx);
+            gyomeiCommitted = true;
+            return true;
+        default:
+            if (tengenCommitted) {
+                fx.Text({ player.pos.x, player.pos.y - 158 }, C(255, 212, 88), 0.9f,
+                        "tengen is already committed");
+                return false;
+            }
+            if (tengen.fallen) {
+                fx.Text({ player.pos.x, player.pos.y - 158 }, C(230, 75, 70), 1.0f,
+                        "TENGEN HAS FALLEN THIS RUN");
+                return false;
+            }
+            if (tengen.state != TengenState::Inactive) {
+                fx.Text({ player.pos.x, player.pos.y - 158 }, C(255, 212, 88), 0.9f,
+                        "tengen is already deployed");
+                return false;
+            }
+            tengen.Summon(player.pos, fx);
+            tengenCommitted = true;
+            return true;
     }
 }
 
@@ -214,6 +260,14 @@ void Game::AutoSummonMuzanHashira() {
     if (!rengoku.fallen && !rengokuCommitted && rengoku.state == RengokuState::Inactive) {
         rengoku.Summon(player.pos, fx);
         rengokuCommitted = true;
+    }
+    if (!gyomei.fallen && !gyomeiCommitted && gyomei.state == GyomeiState::Inactive) {
+        gyomei.Summon(player.pos, fx);
+        gyomeiCommitted = true;
+    }
+    if (!tengen.fallen && !tengenCommitted && tengen.state == TengenState::Inactive) {
+        tengen.Summon(player.pos, fx);
+        tengenCommitted = true;
     }
 }
 
@@ -263,10 +317,40 @@ void Game::EndHashiraEncounter() {
             rengoku.BeginWithdraw(fx);
         }
     }
+    if (!gyomei.fallen) {
+        anyActive = anyActive || gyomei.Active();
+        gyomei.maxHp = gyomei.mastery.MaxHp();
+        float before = gyomei.hp;
+        gyomei.hp = fminf(gyomei.maxHp, gyomei.hp + gyomei.maxHp * 0.20f);
+        anyRecovered = anyRecovered || gyomei.hp > before + 0.5f;
+        if (gyomei.Active()) {
+            gyomei.mastery.xp += 5;
+            gyomei.activeT = 0;
+            gyomei.summonCd = 0;
+            gyomei.mastery.Save();
+            gyomei.BeginWithdraw(fx);
+        }
+    }
+    if (!tengen.fallen) {
+        anyActive = anyActive || tengen.Active();
+        tengen.maxHp = tengen.mastery.MaxHp();
+        float before = tengen.hp;
+        tengen.hp = fminf(tengen.maxHp, tengen.hp + tengen.maxHp * 0.20f);
+        anyRecovered = anyRecovered || tengen.hp > before + 0.5f;
+        if (tengen.Active()) {
+            tengen.mastery.xp += 5;
+            tengen.activeT = 0;
+            tengen.summonCd = 0;
+            tengen.mastery.Save();
+            tengen.BeginWithdraw(fx);
+        }
+    }
 
     giyuCommitted = false;
     shinobuCommitted = false;
     rengokuCommitted = false;
+    gyomeiCommitted = false;
+    tengenCommitted = false;
 
     if (anyActive) {
         fx.Text({ player.pos.x, player.pos.y - 100 }, C(255, 215, 120), 1.0f,
@@ -286,6 +370,10 @@ void Game::UpdateHashiraWithdrawals(float dt) {
         shinobu.Update(dt, player, enemies, boss, akaza, moon, combat, fx);
     if (rengoku.state == RengokuState::Withdraw)
         rengoku.Update(dt, player, enemies, boss, akaza, moon, combat, fx);
+    if (gyomei.state == GyomeiState::Withdraw)
+        gyomei.Update(dt, player, enemies, boss, akaza, moon, combat, fx);
+    if (tengen.state == TengenState::Withdraw)
+        tengen.Update(dt, player, enemies, boss, akaza, moon, combat, fx);
 }
 
 void Game::StartMuzanSurvival() {
@@ -335,7 +423,10 @@ void Game::StartRun() {
     giyu.ResetRun();
     shinobu.ResetRun();
     rengoku.ResetRun();
-    giyuCommitted = shinobuCommitted = rengokuCommitted = false;
+    gyomei.ResetRun();
+    tengen.ResetRun();
+    giyuCommitted = shinobuCommitted = rengokuCommitted = gyomeiCommitted =
+        tengenCommitted = false;
     kills = 0;
     elapsed = 0;
     deathT = 0;
@@ -357,6 +448,8 @@ void Game::ReturnToTitle() {
     giyu.mastery.Save();
     shinobu.mastery.Save();
     rengoku.mastery.Save();
+    gyomei.mastery.Save();
+    tengen.mastery.Save();
     enemies.clear();
     pickups.clear();
     boss.Reset();
@@ -369,7 +462,10 @@ void Game::ReturnToTitle() {
     giyu.ResetRun();
     shinobu.ResetRun();
     rengoku.ResetRun();
-    giyuCommitted = shinobuCommitted = rengokuCommitted = false;
+    gyomei.ResetRun();
+    tengen.ResetRun();
+    giyuCommitted = shinobuCommitted = rengokuCommitted = gyomeiCommitted =
+        tengenCommitted = false;
     toSpawn = 0;
     muzanSurvival = false;
     sunriseFinale = false;
@@ -457,6 +553,14 @@ void Game::ResolveCombat() {
                     rengoku.mastery.xp++;
                     rengoku.mastery.kills++;
                 }
+                if (!e.alive && hb.kind == HitKind::Gyomei && gyomei.mastery.xp < 999) {
+                    gyomei.mastery.xp++;
+                    gyomei.mastery.kills++;
+                }
+                if (!e.alive && hb.kind == HitKind::Tengen && tengen.mastery.xp < 999) {
+                    tengen.mastery.xp++;
+                    tengen.mastery.kills++;
+                }
             }
             if (boss.Alive() && !boss.hitMem.Seen(hb.attackId) &&
                 CheckCollisionRecs(hb.rect, boss.Rect())) {
@@ -471,6 +575,12 @@ void Game::ResolveCombat() {
                 if (hb.kind == HitKind::Rengoku && hb.damage >= 24 &&
                     boss.ForceOpening(fx))
                     rengoku.mastery.xp += 3;
+                if (hb.kind == HitKind::Gyomei && hb.damage >= 28 &&
+                    boss.ForceOpening(fx))
+                    gyomei.mastery.xp += 3;
+                if (hb.kind == HitKind::Tengen && hb.damage >= 18 &&
+                    boss.ForceOpening(fx))
+                    tengen.mastery.xp += 3;
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.kind == HitKind::Fire ? 0.04f : 0.015f);
                     PlaySfx(SFX_HIT, 0.6f, 0.85f);
@@ -493,6 +603,12 @@ void Game::ResolveCombat() {
                 if (hb.kind == HitKind::Rengoku && hb.damage >= 24 &&
                     akaza.ForceOpening(fx))
                     rengoku.mastery.xp += 3;
+                if (hb.kind == HitKind::Gyomei && hb.damage >= 28 &&
+                    akaza.ForceOpening(fx))
+                    gyomei.mastery.xp += 3;
+                if (hb.kind == HitKind::Tengen && hb.damage >= 18 &&
+                    akaza.ForceOpening(fx))
+                    tengen.mastery.xp += 3;
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.kind == HitKind::Fire ? 0.04f : 0.015f);
                     PlaySfx(SFX_HIT, 0.6f, 1.0f);
@@ -517,6 +633,12 @@ void Game::ResolveCombat() {
                 if (hb.kind == HitKind::Rengoku && hb.damage >= 24 &&
                     m->ForceOpening(fx))
                     rengoku.mastery.xp += 3;
+                if (hb.kind == HitKind::Gyomei && hb.damage >= 28 &&
+                    m->ForceOpening(fx))
+                    gyomei.mastery.xp += 3;
+                if (hb.kind == HitKind::Tengen && hb.damage >= 18 &&
+                    m->ForceOpening(fx))
+                    tengen.mastery.xp += 3;
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.kind == HitKind::Fire ? 0.04f : 0.015f);
                     PlaySfx(SFX_HIT, 0.6f, 0.95f);
@@ -541,6 +663,16 @@ void Game::ResolveCombat() {
                 CheckCollisionRecs(hb.rect, rengoku.Rect())) {
                 rengoku.hitMem.Remember(hb.attackId);
                 rengoku.TakeDamage(hb.damage, hb.kbX, hb.kind, fx);
+            }
+            if (gyomei.Active() && !gyomei.hitMem.Seen(hb.attackId) &&
+                CheckCollisionRecs(hb.rect, gyomei.Rect())) {
+                gyomei.hitMem.Remember(hb.attackId);
+                gyomei.TakeDamage(hb.damage, hb.kbX, hb.kind, fx);
+            }
+            if (tengen.Active() && !tengen.hitMem.Seen(hb.attackId) &&
+                CheckCollisionRecs(hb.rect, tengen.Rect())) {
+                tengen.hitMem.Remember(hb.attackId);
+                tengen.TakeDamage(hb.damage, hb.kbX, hb.kind, fx);
             }
             if (player.hitMem.Seen(hb.attackId)) continue;
             if (!CheckCollisionRecs(hb.rect, player.Rect())) continue;
@@ -602,13 +734,23 @@ void Game::UpdatePlaying(float dt) {
         if (rengoku.Active() && fabsf(rengoku.pos.x - e.pos.x) < bestD) {
             tgt = rengoku.pos;
             tgtHidden = false;
+            bestD = fabsf(rengoku.pos.x - e.pos.x);
+        }
+        if (gyomei.Active() && fabsf(gyomei.pos.x - e.pos.x) < bestD) {
+            tgt = gyomei.pos;
+            tgtHidden = false;
+            bestD = fabsf(gyomei.pos.x - e.pos.x);
+        }
+        if (tengen.Active() && fabsf(tengen.pos.x - e.pos.x) < bestD) {
+            tgt = tengen.pos;
+            tgtHidden = false;
         }
         e.Update(dt, tgt, combat, fx, tgtHidden);
     }
     SeparateEnemies(dt);
 
     int summonReq = 0;
-    boss.Update(dt, player, &giyu, &shinobu, &rengoku, combat, fx, summonReq);
+    boss.Update(dt, player, &giyu, &shinobu, &rengoku, &gyomei, &tengen, combat, fx, summonReq);
     if (muzanSurvival && boss.active && !boss.Defeated()) {
         if (!sunriseFinale && boss.Alive()) {
             muzanTimer = fmaxf(0, muzanTimer - dt);
@@ -622,12 +764,14 @@ void Game::UpdatePlaying(float dt) {
             SpawnDemonAtEdge(cfg::WAVE_KOKU);   // endgame-hardened demons
     }
 
-    akaza.Update(dt, player, &giyu, &shinobu, &rengoku, combat, fx);
-    douma.Update(dt, player, &giyu, &shinobu, &rengoku, combat, fx);
-    kokushibo.Update(dt, player, &giyu, &shinobu, &rengoku, combat, fx);
+    akaza.Update(dt, player, &giyu, &shinobu, &rengoku, &gyomei, &tengen, combat, fx);
+    douma.Update(dt, player, &giyu, &shinobu, &rengoku, &gyomei, &tengen, combat, fx);
+    kokushibo.Update(dt, player, &giyu, &shinobu, &rengoku, &gyomei, &tengen, combat, fx);
     giyu.Update(dt, player, enemies, boss, akaza, ActiveMoon(), combat, fx);
     shinobu.Update(dt, player, enemies, boss, akaza, ActiveMoon(), combat, fx);
     rengoku.Update(dt, player, enemies, boss, akaza, ActiveMoon(), combat, fx);
+    gyomei.Update(dt, player, enemies, boss, akaza, ActiveMoon(), combat, fx);
+    tengen.Update(dt, player, enemies, boss, akaza, ActiveMoon(), combat, fx);
 
     ResolveCombat();          // resolve first: every hitbox lands at least once,
     combat.Update(dt);        // even on a slow frame
@@ -675,6 +819,8 @@ void Game::UpdatePlaying(float dt) {
             giyu.mastery.Save();
             shinobu.mastery.Save();
             rengoku.mastery.Save();
+            gyomei.mastery.Save();
+            tengen.mastery.Save();
             SetBossDrone(0);
             state = GState::GameOver;
         }
@@ -725,10 +871,14 @@ void Game::UpdatePlaying(float dt) {
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 6;
         if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 6;
         if (rengoku.summonedThisRun && !rengoku.fallen) rengoku.mastery.xp += 6;
+        if (gyomei.summonedThisRun && !gyomei.fallen) gyomei.mastery.xp += 6;
+        if (tengen.summonedThisRun && !tengen.fallen) tengen.mastery.xp += 6;
         EndHashiraEncounter();
         giyu.mastery.Save();
         shinobu.mastery.Save();
         rengoku.mastery.Save();
+        gyomei.mastery.Save();
+        tengen.mastery.Save();
         moonFallT = 3.5f;
         moonFallText = "UPPER MOON THREE FALLS";
         akaza.Reset();
@@ -741,10 +891,14 @@ void Game::UpdatePlaying(float dt) {
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 8;
         if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 8;
         if (rengoku.summonedThisRun && !rengoku.fallen) rengoku.mastery.xp += 8;
+        if (gyomei.summonedThisRun && !gyomei.fallen) gyomei.mastery.xp += 8;
+        if (tengen.summonedThisRun && !tengen.fallen) tengen.mastery.xp += 8;
         EndHashiraEncounter();
         giyu.mastery.Save();
         shinobu.mastery.Save();
         rengoku.mastery.Save();
+        gyomei.mastery.Save();
+        tengen.mastery.Save();
         moonFallT = 3.5f;
         moonFallText = "UPPER MOON TWO FALLS";
         douma.Reset();
@@ -758,10 +912,14 @@ void Game::UpdatePlaying(float dt) {
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 10;
         if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 10;
         if (rengoku.summonedThisRun && !rengoku.fallen) rengoku.mastery.xp += 10;
+        if (gyomei.summonedThisRun && !gyomei.fallen) gyomei.mastery.xp += 10;
+        if (tengen.summonedThisRun && !tengen.fallen) tengen.mastery.xp += 10;
         EndHashiraEncounter();
         giyu.mastery.Save();
         shinobu.mastery.Save();
         rengoku.mastery.Save();
+        gyomei.mastery.Save();
+        tengen.mastery.Save();
         kokushibo.Reset();
         introTarget = 3;
         state = GState::BossIntro;
@@ -778,10 +936,14 @@ void Game::UpdatePlaying(float dt) {
         if (giyu.summonedThisRun && !giyu.fallen) giyu.mastery.xp += 10;
         if (shinobu.summonedThisRun && !shinobu.fallen) shinobu.mastery.xp += 10;
         if (rengoku.summonedThisRun && !rengoku.fallen) rengoku.mastery.xp += 10;
+        if (gyomei.summonedThisRun && !gyomei.fallen) gyomei.mastery.xp += 10;
+        if (tengen.summonedThisRun && !tengen.fallen) tengen.mastery.xp += 10;
         EndHashiraEncounter();
         giyu.mastery.Save();
         shinobu.mastery.Save();
         rengoku.mastery.Save();
+        gyomei.mastery.Save();
+        tengen.mastery.Save();
         // the progenitor falls - his demons crumble with him
         for (auto& e : enemies) {
             fx.DeathBurst(e.pos, C(160, 40, 60), 1.0f);
@@ -918,6 +1080,8 @@ void Game::Update(float rawDt) {
             if (IsKeyPressed(KEY_G)) TrySummonHashira(0);
             if (IsKeyPressed(KEY_B)) TrySummonHashira(1);
             if (IsKeyPressed(KEY_R)) TrySummonHashira(2);
+            if (IsKeyPressed(KEY_Y)) TrySummonHashira(3);
+            if (IsKeyPressed(KEY_T)) TrySummonHashira(4);
             UpdatePlaying(gdt);
             break;
 
@@ -1277,6 +1441,78 @@ void Game::DrawUI() const {
                           i < rlv ? C(255, 215, 120) : C(45, 40, 52));
     }
 
+    // Gyomei, the Stone Hashira (bottom-left)
+    {
+        int yx = 488, yy = cfg::SCREEN_H - 96;
+        Color ycol = C(188, 178, 158);
+        DrawRectangleRounded({ (float)yx, (float)yy, 46, 46 }, 0.25f, 4, C(22, 18, 26));
+        if (gyomei.fallen) {
+            DrawRectangleRounded({ yx + 4.0f, yy + 4.0f, 38, 38 }, 0.25f, 4, C(44, 38, 34));
+            DrawText("X", yx + 16, yy + 11, 26, C(215, 70, 65));
+            DrawText("FALLEN", yx + 54, yy + 16, 14, C(215, 70, 65));
+        } else if (gyomei.state == GyomeiState::Withdraw) {
+            DrawRectangleRounded({ yx + 4.0f, yy + 4.0f, 38, 38 }, 0.25f, 4, Fade(ycol, 0.45f));
+            DrawText("EXIT", yx + 54, yy + 16, 14, Fade(ycol, 0.85f));
+        } else if (gyomei.Active()) {
+            DrawRectangleRounded({ yx + 4.0f, yy + 4.0f, 38, 38 }, 0.25f, 4, ycol);
+            float f = Clampf(gyomei.hp / gyomei.maxHp, 0, 1);
+            DrawRectangle(yx + 54, yy + 20, (int)(88 * f), 8, ycol);
+            DrawRectangleLines(yx + 54, yy + 20, 88, 8, C(70, 66, 58));
+        } else if (gyomei.summonCd > 0) {
+            float f = Clampf(gyomei.summonCd / gyomei.mastery.SummonCd(), 0, 1);
+            DrawRectangleRounded({ yx + 4.0f, yy + 4.0f, 38, 38 }, 0.25f, 4, Fade(ycol, 0.3f));
+            DrawRectangleRounded({ yx + 4.0f, yy + 4 + 38 * (1 - f), 38, 38 * f }, 0.25f, 4,
+                                 Fade(BLACK, 0.55f));
+            DrawText(TextFormat("%.0f", gyomei.summonCd), yx + 14, yy + 15, 16, WHITE);
+        } else {
+            float pulse = 0.72f + 0.28f * sinf((float)GetTime() * 6.2f);
+            DrawRectangleRounded({ yx + 4.0f, yy + 4.0f, 38, 38 }, 0.25f, 4, Fade(ycol, pulse));
+            DrawText("READY", yx + 54, yy + 16, 14, Fade(ycol, pulse));
+        }
+        DrawText("Y", yx + 4, yy + 52, 13, C(200, 200, 210));
+        DrawText("GYO", yx + 17, yy + 52, 13, Fade(ycol, 0.9f));
+        int ylv = gyomei.mastery.Level();
+        for (int i = 0; i < 5; i++)
+            DrawRectangle(yx + 54 + i * 9, yy + 36, 7, 4,
+                          i < ylv ? C(255, 215, 120) : C(45, 40, 52));
+    }
+
+    // Tengen, the Sound Hashira (bottom-left)
+    {
+        int tx = 644, ty = cfg::SCREEN_H - 96;
+        Color tcol = C(255, 212, 88);
+        DrawRectangleRounded({ (float)tx, (float)ty, 46, 46 }, 0.25f, 4, C(22, 18, 26));
+        if (tengen.fallen) {
+            DrawRectangleRounded({ tx + 4.0f, ty + 4.0f, 38, 38 }, 0.25f, 4, C(56, 38, 30));
+            DrawText("X", tx + 16, ty + 11, 26, C(230, 75, 70));
+            DrawText("FALLEN", tx + 54, ty + 16, 14, C(230, 75, 70));
+        } else if (tengen.state == TengenState::Withdraw) {
+            DrawRectangleRounded({ tx + 4.0f, ty + 4.0f, 38, 38 }, 0.25f, 4, Fade(tcol, 0.45f));
+            DrawText("EXIT", tx + 54, ty + 16, 14, Fade(tcol, 0.85f));
+        } else if (tengen.Active()) {
+            DrawRectangleRounded({ tx + 4.0f, ty + 4.0f, 38, 38 }, 0.25f, 4, tcol);
+            float f = Clampf(tengen.hp / tengen.maxHp, 0, 1);
+            DrawRectangle(tx + 54, ty + 20, (int)(88 * f), 8, tcol);
+            DrawRectangleLines(tx + 54, ty + 20, 88, 8, C(92, 64, 36));
+        } else if (tengen.summonCd > 0) {
+            float f = Clampf(tengen.summonCd / tengen.mastery.SummonCd(), 0, 1);
+            DrawRectangleRounded({ tx + 4.0f, ty + 4.0f, 38, 38 }, 0.25f, 4, Fade(tcol, 0.3f));
+            DrawRectangleRounded({ tx + 4.0f, ty + 4 + 38 * (1 - f), 38, 38 * f }, 0.25f, 4,
+                                 Fade(BLACK, 0.55f));
+            DrawText(TextFormat("%.0f", tengen.summonCd), tx + 14, ty + 15, 16, WHITE);
+        } else {
+            float pulse = 0.72f + 0.28f * sinf((float)GetTime() * 6.6f);
+            DrawRectangleRounded({ tx + 4.0f, ty + 4.0f, 38, 38 }, 0.25f, 4, Fade(tcol, pulse));
+            DrawText("READY", tx + 54, ty + 16, 14, Fade(tcol, pulse));
+        }
+        DrawText("T", tx + 4, ty + 52, 13, C(200, 200, 210));
+        DrawText("TGN", tx + 17, ty + 52, 13, Fade(tcol, 0.9f));
+        int tlv = tengen.mastery.Level();
+        for (int i = 0; i < 5; i++)
+            DrawRectangle(tx + 54 + i * 9, ty + 36, 7, 4,
+                          i < tlv ? C(255, 215, 120) : C(45, 40, 52));
+    }
+
     // right side: stats
     DrawText(TextFormat("KILLS %d", kills), cfg::SCREEN_W - 130, 20, 20, C(220, 210, 220));
     int m = (int)elapsed / 60, s = (int)elapsed % 60;
@@ -1457,7 +1693,7 @@ void Game::DrawSettings() const {
         { "Attack combo",      "J" },
         { "Launcher / Plunge", "UP+J / DOWN+J" },
         { "Breathing Style",   "1" },
-        { "Summon Hashira",    "G / B / R" },
+        { "Summon Hashira",    "G / B / R / Y / T" },
         { "Upgrades",          "TAB" },
         { "Pause menu",        "ESC / P" },
         { "Fullscreen",        "F11" },
@@ -1553,6 +1789,20 @@ void Game::DrawUpgradeMenu() const {
     else
         CText(TextFormat("RENGOKU MASTERY  LV %d  -  %d xp  (next level at %d - burn bright)",
               rengoku.mastery.Level(), rengoku.mastery.xp, rnxt), fy + 80, 14, C(255, 150, 55));
+    int ynxt = gyomei.mastery.NextThreshold();
+    if (ynxt < 0)
+        CText(TextFormat("GYOMEI MASTERY  LV %d  -  %d xp  (MAX - immovable fortress)",
+              gyomei.mastery.Level(), gyomei.mastery.xp), fy + 100, 14, C(188, 178, 158));
+    else
+        CText(TextFormat("GYOMEI MASTERY  LV %d  -  %d xp  (next level at %d - shatter barrages)",
+              gyomei.mastery.Level(), gyomei.mastery.xp, ynxt), fy + 100, 14, C(188, 178, 158));
+    int tnxt = tengen.mastery.NextThreshold();
+    if (tnxt < 0)
+        CText(TextFormat("TENGEN MASTERY  LV %d  -  %d xp  (MAX - flashy finale)",
+              tengen.mastery.Level(), tengen.mastery.xp), fy + 120, 14, C(255, 212, 88));
+    else
+        CText(TextFormat("TENGEN MASTERY  LV %d  -  %d xp  (next level at %d - keep pressure)",
+              tengen.mastery.Level(), tengen.mastery.xp, tnxt), fy + 120, 14, C(255, 212, 88));
 }
 
 void Game::DrawOverlays() const {
@@ -1572,11 +1822,13 @@ void Game::DrawOverlays() const {
         CText("G - summon GIYU TOMIOKA, the Water Hashira. if he falls, he is gone for the run", 446, 15, C(120, 190, 255));
         CText("B - summon SHINOBU KOCHO, the Insect Hashira. poison, triage, and wisteria", 472, 15, C(190, 150, 255));
         CText("R - summon KYOJURO RENGOKU, the Flame Hashira. burst damage and openings", 498, 15, C(255, 150, 55));
-        CText("Clear waves to earn points - press TAB in battle to upgrade your styles", 528, 16, C(255, 215, 120));
-        CText("S - settings (keybinds & volume)      P / ESC - pause      F8 - dev invincible      F11 - fullscreen", 558, 14, C(150, 150, 165));
+        CText("Y - summon GYOMEI HIMEJIMA, the Stone Hashira. fortress defense and crushing power", 524, 15, C(188, 178, 158));
+        CText("T - summon TENGEN UZUI, the Sound Hashira. flashy speed, chains, and explosions", 550, 15, C(255, 212, 88));
+        CText("Clear waves to earn points - press TAB in battle to upgrade your styles", 578, 16, C(255, 215, 120));
+        CText("S - settings (keybinds & volume)      P / ESC - pause      F8 - dev invincible      F11 - fullscreen", 606, 14, C(150, 150, 165));
 
         if (fmodf(gt, 1.2f) < 0.75f)
-            CText("PRESS  ENTER  TO  CHOOSE  YOUR  BREATHING  STYLE", 610, 26, C(240, 210, 130));
+            CText("PRESS  ENTER  TO  CHOOSE  YOUR  BREATHING  STYLE", 648, 24, C(240, 210, 130));
     }
     else if (state == GState::StyleSelect) {
         DrawStyleSelect();
@@ -1733,6 +1985,8 @@ void Game::Draw() {
     giyu.Draw();
     shinobu.Draw();
     rengoku.Draw();
+    gyomei.Draw();
+    tengen.Draw();
     bool inMenu = state == GState::Title || state == GState::StyleSelect ||
                   state == GState::Settings;
     if (!inMenu) player.Draw();

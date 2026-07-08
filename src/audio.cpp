@@ -247,6 +247,51 @@ static Wave GenUpgrade() {
     }
     return w;
 }
+static Wave GenChain() {
+    // metallic chain drag into a heavy clank
+    Wave w = MakeWave(0.36f); short* d = SD(w);
+    for (unsigned int i = 0; i < w.frameCount; i++) {
+        float t = i / (float)SR;
+        float env = sinf(PI * t / 0.36f);
+        float scrape = NoiseF() * 0.38f * env;
+        float bell = 0.0f;
+        const float hits[3] = { 0.03f, 0.12f, 0.22f };
+        const float freqs[3] = { 620.0f, 410.0f, 255.0f };
+        for (int h = 0; h < 3; h++) {
+            if (t >= hits[h]) {
+                float lt = t - hits[h];
+                bell += sinf(2 * PI * freqs[h] * lt) * expf(-lt * 26.0f) * (0.45f - h * 0.08f);
+                bell += sinf(2 * PI * freqs[h] * 2.01f * lt) * expf(-lt * 34.0f) * 0.16f;
+            }
+        }
+        float low = 0.32f * sinf(2 * PI * 74.0f * t) * expf(-t * 8.0f);
+        d[i] = Q(scrape + bell + low, 13000);
+    }
+    return w;
+}
+static Wave GenSoundBreathing() {
+    // bright metallic hit, percussion snap, then a compact blast.
+    Wave w = MakeWave(0.42f); short* d = SD(w);
+    float noiseLp = 0;
+    for (unsigned int i = 0; i < w.frameCount; i++) {
+        float t = i / (float)SR;
+        float blastEnv = expf(-t * 8.0f);
+        noiseLp = noiseLp * 0.94f + NoiseF() * 0.22f;
+        float drum = sinf(2 * PI * (92.0f + 40.0f * expf(-t * 10.0f)) * t) * blastEnv;
+        float chime = 0.0f;
+        const float hits[4] = { 0.0f, 0.055f, 0.115f, 0.20f };
+        for (int h = 0; h < 4; h++) {
+            if (t >= hits[h]) {
+                float lt = t - hits[h];
+                float f = h % 2 == 0 ? 880.0f : 1320.0f;
+                chime += sinf(2 * PI * f * lt) * expf(-lt * 30.0f) * 0.28f;
+            }
+        }
+        float snap = (t < 0.018f || (t > 0.18f && t < 0.205f)) ? NoiseF() * 0.8f : 0.0f;
+        d[i] = Q(drum * 0.72f + noiseLp * 1.1f * blastEnv + chime + snap * blastEnv, 14500);
+    }
+    return w;
+}
 static Wave GenAmbient() {
     const float len = 3.0f;
     Wave w = MakeWave(len); short* d = SD(w);
@@ -302,6 +347,8 @@ void AudioInit() {
     Register(SFX_WIND,    GenWind(), 1);
     Register(SFX_MIST,    GenMist(), 2);
     Register(SFX_UPGRADE, GenUpgrade(), 1);
+    Register(SFX_CHAIN,   GenChain(), 2);
+    Register(SFX_SOUND,   GenSoundBreathing(), 2);
 
     Wave amb = GenAmbient();
     g_ambient = LoadSoundFromWave(amb);

@@ -19,6 +19,8 @@ class Player;
 class Giyu;
 class Shinobu;
 class Rengoku;
+class Gyomei;
+class Tengen;
 
 enum MoonKind { MOON_DOUMA = 0, MOON_KOKU = 1 };
 
@@ -53,7 +55,8 @@ public:
 
     void Reset();
     void Activate(Vector2 p);
-    void Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu, Rengoku* rengoku,
+    void Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
+                Rengoku* rengoku, Gyomei* gyomei, Tengen* tengen,
                 CombatSystem& cs, Effects& fx);
     void Draw() const;
     Rectangle Rect() const;
@@ -84,7 +87,7 @@ public:
 
 private:
     void ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu,
-                      const Rengoku* rengoku);
+                      const Rengoku* rengoku, const Gyomei* gyomei, const Tengen* tengen);
     void EnterRecover(float t);
 
     float stateTimer = 0;
@@ -99,6 +102,8 @@ private:
     bool  preyAlly = false;
     bool  preyShinobu = false;
     bool  preyRengoku = false;
+    bool  preyGyomei = false;
+    bool  preyTengen = false;
     std::vector<Shard> shards;
     std::vector<Lotus> lotus;
     Rectangle slashBand{};         // koku long-slash / flash-slash telegraph
