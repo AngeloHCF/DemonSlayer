@@ -11,6 +11,7 @@
 | **R** | Summon **Kyojuro Rengoku**, the Flame Hashira |
 | **Y** | Summon **Gyomei Himejima**, the Stone Hashira |
 | **T** | Summon **Tengen Uzui**, the Sound Hashira |
+| **N** | Summon **Sanemi Shinazugawa**, the Wind Hashira |
 | A / D or ← / → | Move |
 | W / ↑ / Space | Jump |
 | **Left Shift** (hold) | **Crouch** — slower steps, lowered hurtbox (duck under crescents and fist orbs) |
@@ -77,6 +78,16 @@ Press **T** to summon Tengen as the flashy pressure Hashira. He is one of the fa
 - **He cannot solo the final bosses.** Upper Moons and Muzan resist ally damage, but Tengen's fast pressure can still force openings and clear swarms around the player.
 - **If Tengen falls, he is gone for the rest of the run.**
 - **Mastery persists across runs** (saved to `tengen_mastery.txt` next to the exe): he earns XP from kills, openings, safe withdrawals, and victories. Each level improves speed, health, damage, dodge reliability, and Explosive Deflection durability.
+
+## Sanemi Shinazugawa â€” the Wind Hashira
+
+Press **N** to summon Sanemi as the most aggressive Hashira. He stays close to targets, dashes into danger, and chains fast sword pressure into wide Wind Breathing techniques: **Wind Hashira Combo**, **First Form: Dust Whirlwind Cutter**, **Seventh Form: Gale, Sudden Gusts**, **Fourth Form: Rising Dust Storm**, **Fifth Form: Cold Mountain Wind**, and at maximum mastery **Ninth Form: Idaten Typhoon**.
+
+- **Wind Barrier:** when a major boss attack threatens the field, Sanemi rapidly spins his sword into a violent tornado around himself. The barrier shreds blood crescents, fist orbs, moon shards, hostile hitboxes, and blast rings while also cutting enemies caught inside until its durability is depleted.
+- **He is pure pressure.** His AI prioritizes staying close, pursuing bosses, interrupting windups, and sweeping crowds with traveling wind blades, dust clouds, slash trails, and tornado hits.
+- **He cannot solo the final bosses.** Upper Moons and Muzan resist ally damage, but Sanemi's relentless hits slow them, force openings, and erase demon swarms.
+- **If Sanemi falls, he is gone for the rest of the run.**
+- **Mastery persists across runs** (saved to `sanemi_mastery.txt` next to the exe): he earns XP from kills, openings, safe withdrawals, and victories. Each level improves speed, health, damage, dodge reliability, and Wind Barrier durability.
 
 ## Hashira summon rules
 
@@ -165,6 +176,7 @@ src/shinobu.*   Shinobu Kocho: Insect Forms, poison support, triage, mastery
 src/rengoku.*   Kyojuro Rengoku: Flame Forms, burst support, mastery
 src/gyomei.*    Gyomei Himejima: Stone Forms, chained axe/flail, Stone Guard
 src/tengen.*    Tengen Uzui: Sound Forms, chained cleavers, Explosive Deflection
+src/sanemi.*    Sanemi Shinazugawa: Wind Forms, typhoons, Wind Barrier
 src/enemy.*     demon tiers, swarm AI, armor break, poison, mist confusion
 src/akaza.*     Akaza (Upper Moon Three): fist combos, shockwaves, leap craters
 src/moons.*     Douma (ice, lotus, chill) and Kokushibo (moon arcs, long slashes)

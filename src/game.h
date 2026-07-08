@@ -17,6 +17,7 @@
 #include "rengoku.h"
 #include "gyomei.h"
 #include "tengen.h"
+#include "sanemi.h"
 #include <vector>
 
 enum class GState { Title, StyleSelect, Playing, Upgrade, BossIntro, Paused, Settings, Victory, GameOver };
@@ -87,8 +88,9 @@ private:
     Rengoku rengoku;
     Gyomei gyomei;
     Tengen tengen;
+    Sanemi sanemi;
     bool  giyuCommitted = false, shinobuCommitted = false, rengokuCommitted = false,
-          gyomeiCommitted = false, tengenCommitted = false;
+          gyomeiCommitted = false, tengenCommitted = false, sanemiCommitted = false;
 
     int   selRow = 0, selCol = 0;   // upgrade menu cursor
     int   pauseSel = 0;             // escape-menu cursor (0 resume, 1 settings, 2 quit)

@@ -20,6 +20,7 @@ class Shinobu;
 class Rengoku;
 class Gyomei;
 class Tengen;
+class Sanemi;
 
 enum class AkState {
     Inactive, Intro, Stalk,
@@ -48,7 +49,7 @@ public:
     void Reset();
     void Activate(Vector2 p);
     void Update(float dt, Player& player, Giyu* ally, Shinobu* shinobu,
-                Rengoku* rengoku, Gyomei* gyomei, Tengen* tengen,
+                Rengoku* rengoku, Gyomei* gyomei, Tengen* tengen, Sanemi* sanemi,
                 CombatSystem& cs, Effects& fx);
     void Draw() const;
     Rectangle Rect() const;
@@ -76,7 +77,8 @@ public:
 
 private:
     void ChooseAttack(const Player& player, const Giyu* ally, const Shinobu* shinobu,
-                      const Rengoku* rengoku, const Gyomei* gyomei, const Tengen* tengen);
+                      const Rengoku* rengoku, const Gyomei* gyomei, const Tengen* tengen,
+                      const Sanemi* sanemi);
     void EnterRecover(float t);
 
     float stateTimer = 0;
@@ -93,6 +95,7 @@ private:
     bool  preyRengoku = false;
     bool  preyGyomei = false;
     bool  preyTengen = false;
+    bool  preySanemi = false;
     float leapVx = 0;
     float despSpin = 0;            // desperation barrage spiral angle
     std::vector<FistOrb> orbs;

@@ -139,6 +139,7 @@ void Enemy::TakeDamage(float damage, float kbx, HitKind kind, Effects& fx) {
     if (kind == HitKind::Rengoku) { hitCol = C(255, 150, 55); }
     if (kind == HitKind::Gyomei)  { hitCol = C(188, 178, 158); armorBreak = fmaxf(armorBreak, 4.5f); }
     if (kind == HitKind::Tengen)  { hitCol = C(255, 212, 88); }
+    if (kind == HitKind::Sanemi)  { hitCol = C(205, 245, 226); slowTimer = fmaxf(slowTimer, 0.65f); }
 
     if (type != EType::Brute || armorBreak > 0) {
         // light demons get interrupted and knocked back (stone breaks brute armor)
@@ -147,7 +148,8 @@ void Enemy::TakeDamage(float damage, float kbx, HitKind kind, Effects& fx) {
         lungeTimer = 0;
         vel.x = kbx;
         vel.y = (kind == HitKind::Wind || kind == HitKind::Rengoku ||
-                 kind == HitKind::Gyomei || kind == HitKind::Tengen)
+                 kind == HitKind::Gyomei || kind == HitKind::Tengen ||
+                 kind == HitKind::Sanemi)
                 ? -320.0f : -170.0f;   // gales and Hashira burst attacks launch
     } else {
         vel.x = kbx * 0.25f;    // brutes have knockback armor
