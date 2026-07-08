@@ -1,0 +1,23 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build DemonSlayer",
+            "type": "shell",
+            "command": "C:/msys64/ucrt64/bin/g++.exe",
+            "args": [
+                "src/main.cpp", "src/game.cpp", "src/player.cpp",
+                "src/enemy.cpp", "src/boss.cpp", "src/effects.cpp",
+                "src/combat.cpp", "src/audio.cpp", "src/companion.cpp",
+                "src/akaza.cpp", "src/moons.cpp",
+                "-o", "demonslayer.exe",
+                "-std=c++17", "-O2",
+                "-lraylib", "-lglfw3", "-lopengl32", "-lgdi32", "-lwinmm",
+                "-static", "-static-libgcc", "-static-libstdc++"
+            ],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$gcc"]
+        }
+    ]
+}
