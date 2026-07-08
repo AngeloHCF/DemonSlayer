@@ -39,6 +39,7 @@ static Sound g_ambient{};
 static Sound g_drone{};          // Kokushibo's oppressive moon-drone (looping)
 static int   g_droneMode = 0;    // 0 off, 1 Kokushibo
 static float g_ambVol = 0.55f;   // current night-wind volume (ducked under drone)
+static float g_masterVol = 0.8f; // master volume (settings menu)
 static bool g_ready = false;
 
 static void Register(int id, Wave w, int aliases) {
@@ -283,7 +284,7 @@ static Wave GenMoonDrone() {
 void AudioInit() {
     InitAudioDevice();
     if (!IsAudioDeviceReady()) { g_ready = false; return; }
-    SetMasterVolume(0.8f);
+    SetMasterVolume(g_masterVol);
 
     Register(SFX_SLASH,  GenSlash(), 3);
     Register(SFX_HIT,    GenHit(), 3);
@@ -346,6 +347,13 @@ void AudioShutdown() {
     }
     CloseAudioDevice();
 }
+
+void AudioSetMasterVolume(float v) {
+    g_masterVol = Clampf(v, 0.0f, 1.0f);
+    if (g_ready) SetMasterVolume(g_masterVol);
+}
+
+float AudioGetMasterVolume() { return g_masterVol; }
 
 void PlaySfx(int id, float vol, float pitch, float jitter) {
     if (!g_ready || id < 0 || id >= SFX_COUNT) return;

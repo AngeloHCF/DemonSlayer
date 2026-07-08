@@ -62,6 +62,7 @@ public:
     int facing = 1;
     float hp = 0, maxHp = 0;
     float cd[STYLE_COUNT] = {};  // per-style cooldown timers
+    int   equipped = STYLE_WATER; // the one Breathing Style carried into this run
     float iframes = 0;
     HitMemory hitMem;            // enemy attack ids that already connected
     PState state = PState::Normal;

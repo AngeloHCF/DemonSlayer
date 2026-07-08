@@ -198,14 +198,17 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
     float move = (right ? 1.0f : 0.0f) - (left ? 1.0f : 0.0f);
     bool jumpP = IsKeyPressed(KEY_W) || IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_SPACE);
     bool atkP  = IsKeyPressed(KEY_J) || IsKeyPressed(KEY_X);
+    // Breathing Styles activate on the number-key row 1..6. Styles may share a
+    // key (Water & Stone are both 1); only the equipped style ever responds.
+    const int numKey[6] = { KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR, KEY_FIVE, KEY_SIX };
     bool styleP[STYLE_COUNT];
-    styleP[STYLE_WATER]   = IsKeyPressed(KEY_K) || IsKeyPressed(KEY_ONE);
-    styleP[STYLE_FIRE]    = IsKeyPressed(KEY_L) || IsKeyPressed(KEY_TWO);
-    styleP[STYLE_STONE]   = IsKeyPressed(KEY_I) || IsKeyPressed(KEY_THREE);
-    styleP[STYLE_LOVE]    = IsKeyPressed(KEY_O) || IsKeyPressed(KEY_FOUR);
-    styleP[STYLE_SERPENT] = IsKeyPressed(KEY_U) || IsKeyPressed(KEY_FIVE);
-    styleP[STYLE_WIND]    = IsKeyPressed(KEY_H) || IsKeyPressed(KEY_SIX);
-    styleP[STYLE_MIST]    = IsKeyPressed(KEY_M) || IsKeyPressed(KEY_SEVEN);
+    for (int i = 0; i < STYLE_COUNT; i++)
+        styleP[i] = IsKeyPressed(numKey[StyleKeyNumber(i) - 1]);
+
+    // only the equipped Breathing Style is available for the run; the
+    // rest are locked out even if the player presses their keys
+    for (int i = 0; i < STYLE_COUNT; i++)
+        if (i != equipped) styleP[i] = false;
 
     switch (state) {
         case PState::Normal: {

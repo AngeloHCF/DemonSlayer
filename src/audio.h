@@ -28,6 +28,10 @@ void AudioInit();       // call once after InitWindow
 void AudioUpdate();     // call once per frame (keeps ambient wind looping)
 void AudioShutdown();   // call before CloseWindow
 
+// master volume (0..1), used by the settings menu
+void  AudioSetMasterVolume(float v);
+float AudioGetMasterVolume();
+
 // vol 0..1, pitch multiplier, random pitch jitter
 void PlaySfx(int id, float vol = 1.0f, float pitch = 1.0f, float jitter = 0.06f);
 

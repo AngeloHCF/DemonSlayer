@@ -19,6 +19,45 @@ enum StyleId {
 
 enum UpTrack { TRACK_POWER, TRACK_FLOW, TRACK_REACH, TRACK_MASTERY };
 
+// The number key that activates the equipped Breathing Style. Only one style is
+// ever equipped, so every style uses the same key: 1. Keep STYLE_INFO[].key
+// (game.cpp) in sync with this.
+inline int StyleKeyNumber(int /*s*/) { return 1; }
+
+// ---------------------------------------------------------------
+// StyleUnlocks — which Breathing Styles the player is allowed to
+// equip. This is account-level state (it must survive between runs),
+// so it lives OUTSIDE Progression, which resets at the start of every
+// run. Water is the first form every slayer learns; the rest start
+// locked until unlocked (e.g. the --unlock-all developer flag).
+// ---------------------------------------------------------------
+class StyleUnlocks {
+public:
+    // every Breathing Style is available from the start; the lock machinery
+    // stays in place so specific styles can be gated later if desired.
+    StyleUnlocks() { UnlockAll(); }
+
+    bool IsUnlocked(int s) const {
+        return s >= 0 && s < STYLE_COUNT && unlocked[s];
+    }
+    void Unlock(int s)  { if (s >= 0 && s < STYLE_COUNT) unlocked[s] = true; }
+    void UnlockAll()    { for (int i = 0; i < STYLE_COUNT; i++) unlocked[i] = true; }
+
+    // the first unlocked style — a safe fallback when the desired one is locked
+    int FirstUnlocked() const {
+        for (int i = 0; i < STYLE_COUNT; i++) if (unlocked[i]) return i;
+        return STYLE_WATER;
+    }
+    int Count() const {
+        int n = 0;
+        for (int i = 0; i < STYLE_COUNT; i++) if (unlocked[i]) n++;
+        return n;
+    }
+
+private:
+    bool unlocked[STYLE_COUNT] = {};
+};
+
 struct StyleUpgrades {
     int power = 0, flow = 0, reach = 0;   // 0..3
     bool mastery = false;

@@ -36,11 +36,10 @@ int main(int argc, char** argv) {
 
     Game game;
     game.Init();
+    // --unlock-all makes every Breathing Style selectable in the menu (and maxes
+    // the equipped style's tree each run). Apply before any debug jump.
+    if (unlockAll) game.UnlockAllForTesting();
     if (jump >= 0) game.DebugStart(jump);
-    if (unlockAll) {
-        if (jump < 0) game.DebugStart(0);
-        game.UnlockAllForTesting();
-    }
 
     while (!WindowShouldClose() && !game.quit) {
         if (IsKeyPressed(KEY_F11) ||

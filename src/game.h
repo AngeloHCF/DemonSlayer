@@ -17,7 +17,7 @@
 #include "rengoku.h"
 #include <vector>
 
-enum class GState { Title, Playing, Upgrade, BossIntro, Paused, Victory, GameOver };
+enum class GState { Title, StyleSelect, Playing, Upgrade, BossIntro, Paused, Settings, Victory, GameOver };
 
 struct Pickup {              // healing orb dropped by demons
     Vector2 pos{}, vel{};
@@ -31,16 +31,20 @@ public:
     void Draw();
     // jump: 0 waves (--demo), 1 Akaza, 2 Muzan, 3 Douma, 4 Kokushibo
     void DebugStart(int jump);
-    void UnlockAllForTesting();
+    void UnlockAllForTesting();     // --unlock-all: every Breathing Style selectable
 
     bool quit = false;       // set when the player asks to leave
 
 private:
     void StartRun();
+    void ReturnToTitle();          // abandon the run and go back to the main menu
     void StartWave(int n);
     void SpawnEnemy();
     void SpawnDemonAtEdge(int wave);
     void UpdatePlaying(float dt);
+    void UpdateStyleSelect();
+    void UpdateSettings();
+    void CycleEquippedStyle(int dir);   // dev: switch equipped style (--unlock-all)
     void UpdateUpgradeMenu();
     void ResolveCombat();
     void SeparateEnemies(float dt);
@@ -56,6 +60,8 @@ private:
 
     void DrawBackground() const;
     void DrawUI() const;
+    void DrawStyleSelect() const;
+    void DrawSettings() const;
     void DrawUpgradeMenu() const;
     void DrawOverlays() const;
 
@@ -70,12 +76,19 @@ private:
     CombatSystem combat;
     std::vector<Pickup> pickups;
     Progression prog;
+    StyleUnlocks unlocks;              // which styles may be equipped (persists across runs)
+    int   selectedStyle = STYLE_WATER; // the style carried into the next run
+    int   styleSelCursor = 0;          // selection-menu cursor
+    bool  devUnlockAll = false;        // --unlock-all: also max the equipped style's tree
     Giyu giyu;
     Shinobu shinobu;
     Rengoku rengoku;
     bool  giyuCommitted = false, shinobuCommitted = false, rengokuCommitted = false;
 
     int   selRow = 0, selCol = 0;   // upgrade menu cursor
+    int   pauseSel = 0;             // escape-menu cursor (0 resume, 1 settings, 2 quit)
+    int   settingsSel = 0;          // settings-menu cursor
+    GState settingsFrom = GState::Title;  // where to return when leaving settings
     // the night's gauntlet: waves -> Akaza -> waves -> Douma -> waves
     // -> Kokushibo -> Muzan. introTarget routes the next BossIntro.
     int   introTarget = 0;          // 0 akaza, 1 douma, 2 kokushibo, 3 muzan

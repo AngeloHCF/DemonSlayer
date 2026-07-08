@@ -13,18 +13,30 @@ static void CText(const char* t, int y, int size, Color c) {
 
 // style display data shared by HUD + upgrade menu
 struct StyleInfo { const char* name; const char* shortName; const char* key; Color col; };
+// NOTE: the "key" field mirrors StyleKeyNumber() in styles.h — every style uses
+// 1, because only the equipped style ever responds to input.
 static const StyleInfo STYLE_INFO[STYLE_COUNT] = {
-    { "WATER",   "WTR", "K", { 80, 160, 255, 255 } },
-    { "FIRE",    "FIR", "L", { 255, 130, 50, 255 } },
-    { "STONE",   "STN", "I", { 185, 175, 160, 255 } },
-    { "LOVE",    "LOV", "O", { 255, 130, 195, 255 } },
-    { "SERPENT", "SRP", "U", { 120, 220, 90, 255 } },
-    { "WIND",    "WND", "H", { 200, 240, 220, 255 } },
-    { "MIST",    "MST", "M", { 175, 185, 205, 255 } },
+    { "WATER",   "WTR", "1", { 80, 160, 255, 255 } },
+    { "FIRE",    "FIR", "1", { 255, 130, 50, 255 } },
+    { "STONE",   "STN", "1", { 185, 175, 160, 255 } },
+    { "LOVE",    "LOV", "1", { 255, 130, 195, 255 } },
+    { "SERPENT", "SRP", "1", { 120, 220, 90, 255 } },
+    { "WIND",    "WND", "1", { 200, 240, 220, 255 } },
+    { "MIST",    "MST", "1", { 175, 185, 205, 255 } },
 };
 static const float STYLE_CD_BASE[STYLE_COUNT] = {
     cfg::WATER_CD, cfg::FIRE_CD, cfg::STONE_CD, cfg::LOVE_CD,
     cfg::SERPENT_CD, cfg::WIND_CD, cfg::MIST_CD
+};
+// one-line blurbs for the Breathing Style selection menu
+static const char* STYLE_DESC[STYLE_COUNT] = {
+    "flowing multi-hit dash with long invulnerability",
+    "explosive forward burst of flame",
+    "guard-crushing ground slam",
+    "healing dance of blades",
+    "venomous weaving flurry",
+    "sweeping twin tornadoes",
+    "vanish, blink, and ambush from the fog",
 };
 static const char* MASTERY_DESC[STYLE_COUNT] = {
     "CONSTANT FLUX - the dash flows back through the enemy line a second time",
@@ -84,10 +96,10 @@ void Game::DebugStart(int jump) {
 }
 
 void Game::UnlockAllForTesting() {
-    prog.UnlockAll();
-    fx.Text({ player.pos.x, player.pos.y - 112 }, C(255, 215, 120), 1.0f,
-            "ALL ABILITIES UNLOCKED");
-    PlaySfx(SFX_UPGRADE, 0.8f);
+    // --unlock-all developer flag: every Breathing Style becomes selectable
+    // in the menu, and the equipped style's upgrade tree is maxed each run.
+    devUnlockAll = true;
+    unlocks.UnlockAll();
 }
 
 int Game::HashiraLimit() const {
@@ -302,8 +314,12 @@ void Game::BeginSunriseFinale() {
 
 void Game::StartRun() {
     prog.Reset();
+    if (devUnlockAll) prog.UnlockAll();   // --unlock-all: max the equipped style's tree
     player.prog = &prog;
     player.Reset({ cfg::SCREEN_W * 0.5f, cfg::GROUND_Y - 60 });
+    // equip the chosen Breathing Style for the whole run (fall back if it is locked)
+    if (!unlocks.IsUnlocked(selectedStyle)) selectedStyle = unlocks.FirstUnlocked();
+    player.equipped = selectedStyle;
     player.invincible = devInvincible;
     player.maxHp = 200;
     player.hp = 200;
@@ -334,6 +350,30 @@ void Game::StartRun() {
     sunriseOutroT = 0;
     StartWave(1);
     state = GState::Playing;
+}
+
+void Game::ReturnToTitle() {
+    // preserve any Hashira mastery earned this run, then tear the run down
+    giyu.mastery.Save();
+    shinobu.mastery.Save();
+    rengoku.mastery.Save();
+    enemies.clear();
+    pickups.clear();
+    boss.Reset();
+    akaza.Reset();
+    douma.Reset();
+    kokushibo.Reset();
+    SetBossDrone(0);
+    combat.Clear();
+    fx.Reset();
+    giyu.ResetRun();
+    shinobu.ResetRun();
+    rengoku.ResetRun();
+    giyuCommitted = shinobuCommitted = rengokuCommitted = false;
+    toSpawn = 0;
+    muzanSurvival = false;
+    sunriseFinale = false;
+    state = GState::Title;
 }
 
 void Game::StartWave(int n) {
@@ -751,15 +791,75 @@ void Game::UpdatePlaying(float dt) {
     }
 }
 
+void Game::UpdateStyleSelect() {
+    if (IsKeyPressed(KEY_ESCAPE)) { state = GState::Title; return; }
+    if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S))
+        styleSelCursor = (styleSelCursor + 1) % STYLE_COUNT;
+    if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W))
+        styleSelCursor = (styleSelCursor + STYLE_COUNT - 1) % STYLE_COUNT;
+    if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_J)) {
+        if (unlocks.IsUnlocked(styleSelCursor)) {
+            selectedStyle = styleSelCursor;     // remembered for the run
+            PlaySfx(SFX_UPGRADE, 0.9f);
+            StartRun();
+        } else {
+            PlaySfx(SFX_PICKUP, 0.35f, 0.5f);   // locked: rejection blip
+        }
+    }
+}
+
+void Game::CycleEquippedStyle(int dir) {
+    // step to the next unlocked style in the given direction (dev convenience)
+    int s = player.equipped;
+    for (int i = 0; i < STYLE_COUNT; i++) {
+        s = (s + dir + STYLE_COUNT) % STYLE_COUNT;
+        if (unlocks.IsUnlocked(s)) break;
+    }
+    player.equipped = s;
+    selectedStyle = s;        // remembered for the next run too
+    player.cd[s] = 0;         // ready to use immediately
+    PlaySfx(SFX_UPGRADE, 0.7f);
+}
+
+void Game::UpdateSettings() {
+    // rows in display order: volume, [dev] change style, back
+    int order[3], n = 0;
+    order[n++] = 0;                        // master volume
+    if (devUnlockAll) order[n++] = 1;      // change breathing style (dev only)
+    order[n++] = 2;                        // back
+    if (settingsSel >= n) settingsSel = n - 1;
+
+    if (IsKeyPressed(KEY_ESCAPE)) { state = settingsFrom; return; }
+    if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S))
+        settingsSel = (settingsSel + 1) % n;
+    if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W))
+        settingsSel = (settingsSel + n - 1) % n;
+
+    int row = order[settingsSel];
+    if (row == 0) {                        // master volume
+        float v = AudioGetMasterVolume();
+        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) {
+            AudioSetMasterVolume(v + 0.05f); PlaySfx(SFX_PICKUP, 0.4f, 1.2f);
+        }
+        if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) {
+            AudioSetMasterVolume(v - 0.05f); PlaySfx(SFX_PICKUP, 0.4f, 0.9f);
+        }
+    } else if (row == 1) {                 // change breathing style
+        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) CycleEquippedStyle(+1);
+        if (IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_A)) CycleEquippedStyle(-1);
+    } else {                               // back
+        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_J))
+            state = settingsFrom;
+    }
+}
+
 void Game::UpdateUpgradeMenu() {
     if (IsKeyPressed(KEY_TAB) || IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_P)) {
         state = GState::Playing;
         return;
     }
-    if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S))
-        selRow = (selRow + 1) % STYLE_COUNT;
-    if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W))
-        selRow = (selRow + STYLE_COUNT - 1) % STYLE_COUNT;
+    // upgrades only apply to the equipped style; row navigation is disabled
+    selRow = player.equipped;
     if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D))
         selCol = (selCol + 1) % 4;
     if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A))
@@ -778,13 +878,35 @@ void Game::Update(float rawDt) {
 
     switch (state) {
         case GState::Title:
-            if (IsKeyPressed(KEY_ENTER)) StartRun();
+            if (IsKeyPressed(KEY_ENTER)) {
+                // open the Breathing Style menu; start on a style you can equip
+                styleSelCursor = unlocks.IsUnlocked(selectedStyle)
+                                 ? selectedStyle : unlocks.FirstUnlocked();
+                state = GState::StyleSelect;
+            }
+            if (IsKeyPressed(KEY_S)) {          // settings: keybinds & volume
+                settingsFrom = GState::Title;
+                settingsSel = 0;
+                state = GState::Settings;
+            }
             if (IsKeyPressed(KEY_ESCAPE)) quit = true;
             break;
 
+        case GState::StyleSelect:
+            UpdateStyleSelect();
+            break;
+
         case GState::Playing:
-            if (IsKeyPressed(KEY_P))   { state = GState::Paused; return; }
-            if (IsKeyPressed(KEY_TAB)) { state = GState::Upgrade; return; }
+            if (IsKeyPressed(KEY_P) || IsKeyPressed(KEY_ESCAPE)) {
+                pauseSel = 0;               // default highlight on Resume
+                state = GState::Paused;
+                return;
+            }
+            if (IsKeyPressed(KEY_TAB)) {
+                selRow = player.equipped;   // upgrades apply to the equipped style
+                state = GState::Upgrade;
+                return;
+            }
             if (IsKeyPressed(KEY_F8))  {
                 devInvincible = !devInvincible;
                 player.invincible = devInvincible;
@@ -826,7 +948,26 @@ void Game::Update(float rawDt) {
             break;
         }
         case GState::Paused:
-            if (IsKeyPressed(KEY_P)) state = GState::Playing;
+            if (IsKeyPressed(KEY_P) || IsKeyPressed(KEY_ESCAPE)) {
+                state = GState::Playing;
+                break;
+            }
+            if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S))
+                pauseSel = (pauseSel + 1) % 3;
+            if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W))
+                pauseSel = (pauseSel + 2) % 3;
+            if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_J)) {
+                if (pauseSel == 0) state = GState::Playing;
+                else if (pauseSel == 1) {              // open settings
+                    settingsFrom = GState::Paused;
+                    settingsSel = 0;
+                    state = GState::Settings;
+                } else ReturnToTitle();                // quit to the main menu
+            }
+            break;
+
+        case GState::Settings:
+            UpdateSettings();
             break;
 
         case GState::Victory:
@@ -999,12 +1140,15 @@ void Game::DrawUI() const {
         DrawRectangleRounded({ 24, 22, fmaxf(256 * hf, 6), 18 }, 0.4f, 6, hpc);
     DrawText(TextFormat("%d / %d", (int)player.hp, (int)player.maxHp), 30, 24, 14, C(10, 12, 14));
 
-    // breathing styles
-    for (int i = 0; i < STYLE_COUNT; i++) {
-        const StyleUpgrades& u = prog.up[i];
-        DrawAbilityIcon(20 + i * 52, 56, STYLE_INFO[i].key, STYLE_INFO[i].shortName,
-                        player.cd[i], STYLE_CD_BASE[i] * prog.CdMult(i),
-                        STYLE_INFO[i].col, u.power + u.flow + u.reach, u.mastery);
+    // equipped breathing style (only the chosen style is available this run)
+    {
+        int es = player.equipped;
+        const StyleUpgrades& u = prog.up[es];
+        DrawAbilityIcon(20, 56, STYLE_INFO[es].key, STYLE_INFO[es].shortName,
+                        player.cd[es], STYLE_CD_BASE[es] * prog.CdMult(es),
+                        STYLE_INFO[es].col, u.power + u.flow + u.reach, u.mastery);
+        DrawText(TextFormat("%s BREATHING", STYLE_INFO[es].name), 78, 62, 18,
+                 Fade(STYLE_INFO[es].col, 0.95f));
     }
 
     // upgrade hint
@@ -1210,85 +1354,205 @@ void Game::DrawUI() const {
     }
 }
 
-void Game::DrawUpgradeMenu() const {
-    DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(BLACK, 0.78f));
-    CText("BREATHING  MASTERY", 26, 38, C(235, 225, 235));
-    DrawText(TextFormat("POINTS  %d", prog.points), cfg::SCREEN_W - 220, 30, 28, C(255, 215, 120));
-    CText("arrows / WASD - navigate      ENTER - purchase      TAB - return to battle", 72, 15, C(170, 165, 185));
+void Game::DrawStyleSelect() const {
+    DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(BLACK, 0.82f));
+    CText("CHOOSE  YOUR  BREATHING  STYLE", 40, 40, C(235, 225, 235));
+    CText("You carry one Breathing Style into the night.", 92, 18, C(190, 185, 200));
 
-    const int y0 = 104, rh = 62;
-    const int cellX[4] = { 320, 552, 784, 1016 };
-    const int cellW = 216, cellH = 50;
+    const int y0 = 150, rh = 66;
+    const float cx = 220, cw = 840;
 
-    for (int r = 0; r < STYLE_COUNT; r++) {
-        int y = y0 + r * rh;
-        const StyleInfo& si = STYLE_INFO[r];
+    for (int i = 0; i < STYLE_COUNT; i++) {
+        int y = y0 + i * rh;
+        const StyleInfo& si = STYLE_INFO[i];
+        bool unlocked = unlocks.IsUnlocked(i);
+        bool sel = (styleSelCursor == i);
 
-        // style chip
-        DrawRectangleRounded({ 46, (float)y + 2, 14, (float)cellH - 4 }, 0.4f, 4, si.col);
-        DrawText(si.name, 72, y + 6, 22, C(230, 225, 235));
-        DrawText(TextFormat("[%s]", si.key), 72, y + 30, 14, Fade(si.col, 0.85f));
+        Rectangle card = { cx, (float)y, cw, (float)(rh - 12) };
+        DrawRectangleRounded(card, 0.16f, 6, sel ? C(46, 40, 56) : C(26, 22, 32));
 
-        for (int c = 0; c < 4; c++) {
-            bool sel = (selRow == r && selCol == c);
-            Rectangle cell = { (float)cellX[c], (float)y, (float)cellW, (float)cellH };
-            DrawRectangleRounded(cell, 0.2f, 4, sel ? C(46, 38, 56) : C(28, 24, 36));
+        // color chip (drained to grey while locked)
+        DrawRectangleRounded({ card.x + 14, card.y + 10, 12, card.height - 20 }, 0.4f, 4,
+                             unlocked ? si.col : C(70, 66, 78));
 
-            int lv = prog.TrackLevel(r, c);
-            bool can = prog.CanBuy(r, c);
-            Color labelC = can ? C(225, 220, 232) : C(130, 125, 145);
+        Color nameC = unlocked ? C(232, 226, 236) : C(120, 116, 130);
+        DrawText(si.name, (int)card.x + 42, y + 8, 26, nameC);
+        DrawText(TextFormat("[%s]", si.key), (int)card.x + 42, y + 36, 14,
+                 Fade(unlocked ? si.col : C(120, 116, 130), 0.85f));
+        DrawText(STYLE_DESC[i], (int)card.x + 168, y + 20, 16,
+                 unlocked ? C(202, 198, 212) : C(112, 108, 122));
 
-            if (c < 3) {
-                const char* names[3] = { "POWER", "FLOW", "REACH" };
-                DrawText(names[c], (int)cell.x + 10, y + 7, 16, labelC);
-                for (int p = 0; p < 3; p++) {
-                    Color pc = p < lv ? si.col : C(52, 46, 62);
-                    DrawRectangle((int)cell.x + 10 + p * 20, y + 30, 15, 10, pc);
-                }
-                DrawText(lv >= 3 ? "MAX" : "1 pt", (int)cell.x + cellW - 42, y + 18, 14,
-                         lv >= 3 ? Fade(si.col, 0.9f) : labelC);
-            } else {
-                DrawText("MASTERY", (int)cell.x + 10, y + 7, 16,
-                         lv > 0 ? C(255, 215, 120) : labelC);
-                if (lv > 0)
-                    DrawText("UNLOCKED", (int)cell.x + 10, y + 29, 14, C(255, 215, 120));
-                else
-                    DrawText("2 pts", (int)cell.x + cellW - 48, y + 18, 14, labelC);
-            }
-            if (sel)
-                DrawRectangleLinesEx(cell, 2, C(255, 215, 120));
+        // right-aligned status tag
+        const char* tag = !unlocked ? "LOCKED" : (sel ? "ENTER TO EQUIP" : "READY");
+        Color tagC = !unlocked ? C(196, 96, 104)
+                   : sel        ? C(255, 215, 120) : Fade(si.col, 0.9f);
+        int tw = MeasureText(tag, 18);
+        DrawText(tag, (int)(card.x + card.width - tw - 22), y + 16, 18, tagC);
+
+        if (sel)
+            DrawRectangleLinesEx(card, 2, unlocked ? C(255, 215, 120) : C(196, 96, 104));
+    }
+
+    int fy = y0 + STYLE_COUNT * rh + 16;
+    CText("UP / DOWN - browse       ENTER - equip & begin       ESC - back", fy, 18,
+          C(210, 205, 220));
+    if (devUnlockAll)
+        CText("DEV: --unlock-all active - every style unlocked", fy + 28, 15,
+              C(255, 215, 120));
+    else
+        CText(TextFormat("styles unlocked: %d / %d", unlocks.Count(), STYLE_COUNT),
+              fy + 28, 15, C(150, 146, 162));
+}
+
+void Game::DrawSettings() const {
+    DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(BLACK, 0.86f));
+    CText("SETTINGS", 44, 44, C(235, 225, 235));
+
+    // ---- left column: adjustable options ----
+    int order[3], n = 0;
+    order[n++] = 0;                        // volume
+    if (devUnlockAll) order[n++] = 1;      // change style (dev)
+    order[n++] = 2;                        // back
+
+    const int lx = 120, ry = 158, rh = 78, bw = 520;
+    for (int i = 0; i < n; i++) {
+        int row = order[i];
+        bool sel = (settingsSel == i);
+        int y = ry + i * rh;
+        Rectangle box = { (float)lx, (float)y, (float)bw, 62 };
+        DrawRectangleRounded(box, 0.16f, 6, sel ? C(46, 40, 56) : C(26, 22, 32));
+        if (sel) DrawRectangleLinesEx(box, 2, C(255, 215, 120));
+
+        if (row == 0) {
+            DrawText("MASTER VOLUME", lx + 18, y + 8, 20, C(226, 221, 233));
+            float v = AudioGetMasterVolume();
+            int bx = lx + 18, by = y + 38, barW = 340, barH = 12;
+            DrawRectangleRounded({ (float)bx, (float)by, (float)barW, (float)barH }, 0.5f, 4,
+                                 C(50, 46, 60));
+            DrawRectangleRounded({ (float)bx, (float)by, fmaxf(barW * v, 6.0f), (float)barH },
+                                 0.5f, 4, C(120, 200, 235));
+            DrawText(TextFormat("%d%%", (int)(v * 100 + 0.5f)), bx + barW + 14, y + 32, 20,
+                     C(210, 230, 240));
+            DrawText("< >", lx + bw - 52, y + 8, 18, sel ? C(255, 215, 120) : C(120, 116, 132));
+        } else if (row == 1) {
+            DrawText("BREATHING STYLE", lx + 18, y + 8, 20, C(226, 221, 233));
+            const StyleInfo& si = STYLE_INFO[player.equipped];
+            DrawText(si.name, lx + 18, y + 34, 20, si.col);
+            DrawText("dev: swap styles mid-run", lx + 190, y + 37, 15, C(150, 146, 162));
+            DrawText("< >", lx + bw - 52, y + 8, 18, sel ? C(255, 215, 120) : C(120, 116, 132));
+        } else {
+            DrawText("BACK", lx + 18, y + 17, 22, sel ? C(255, 225, 150) : C(210, 205, 218));
         }
     }
 
-    // footer: what does the selected cell do?
-    int fy = y0 + STYLE_COUNT * rh + 10;
-    const char* desc = (selCol < 3) ? TRACK_DESC[selCol] : MASTERY_DESC[selRow];
-    CText(desc, fy, 17, C(215, 210, 225));
-    CText(TextFormat("%s BREATHING", STYLE_INFO[selRow].name), fy + 26, 14,
-          Fade(STYLE_INFO[selRow].col, 0.9f));
+    // ---- right column: keybinds reference ----
+    int kx = 720, ky = 158;
+    DrawText("CONTROLS", kx, ky, 22, C(235, 225, 235));
+    ky += 34;
+    struct KB { const char* a; const char* b; };
+    static const KB binds[] = {
+        { "Move",              "A / D" },
+        { "Jump",              "W / SPACE" },
+        { "Crouch",            "SHIFT" },
+        { "Attack combo",      "J" },
+        { "Launcher / Plunge", "UP+J / DOWN+J" },
+        { "Breathing Style",   "1" },
+        { "Summon Hashira",    "G / B / R" },
+        { "Upgrades",          "TAB" },
+        { "Pause menu",        "ESC / P" },
+        { "Fullscreen",        "F11" },
+    };
+    for (const KB& kb : binds) {
+        DrawText(kb.a, kx, ky, 16, C(190, 186, 202));
+        int tw = MeasureText(kb.b, 16);
+        DrawText(kb.b, 1176 - tw, ky, 16, C(226, 221, 233));
+        ky += 23;
+    }
 
-    // Giyu's mastery grows on its own, through battles fought together
+    ky += 12;
+    DrawText("Whichever Breathing Style you equip fires on 1 -", kx, ky, 15,
+             C(160, 156, 172));
+    DrawText("you only ever carry one into a run.", kx, ky + 20, 15, C(160, 156, 172));
+
+    CText("UP / DOWN - select      LEFT / RIGHT - adjust      ESC - back", 666, 18,
+          C(175, 170, 188));
+}
+
+void Game::DrawUpgradeMenu() const {
+    DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(BLACK, 0.82f));
+    CText("BREATHING  MASTERY", 40, 40, C(235, 225, 235));
+    DrawText(TextFormat("POINTS  %d", prog.points), cfg::SCREEN_W - 230, 42, 28, C(255, 215, 120));
+    CText("LEFT / RIGHT - choose upgrade      ENTER - purchase      TAB - return to battle",
+          92, 16, C(170, 165, 185));
+
+    // only the equipped style is upgradable — the menu shows it alone
+    const int s = player.equipped;
+    const StyleInfo& si = STYLE_INFO[s];
+    CText(TextFormat("%s  BREATHING", si.name), 150, 34, si.col);
+    CText(TextFormat("[ %s ]  -  the only style you carry this run", si.key),
+          196, 15, Fade(si.col, 0.85f));
+
+    const int cellW = 260, cellH = 96, gap = 20;
+    const int total = 4 * cellW + 3 * gap;
+    const int x0 = (cfg::SCREEN_W - total) / 2;
+    const int cy = 258;
+    for (int c = 0; c < 4; c++) {
+        bool sel = (selCol == c);
+        Rectangle cell = { (float)(x0 + c * (cellW + gap)), (float)cy, (float)cellW, (float)cellH };
+        DrawRectangleRounded(cell, 0.16f, 6, sel ? C(46, 38, 56) : C(28, 24, 36));
+
+        int lv = prog.TrackLevel(s, c);
+        bool can = prog.CanBuy(s, c);
+        Color labelC = can ? C(230, 225, 235) : C(130, 125, 145);
+
+        if (c < 3) {
+            const char* names[3] = { "POWER", "FLOW", "REACH" };
+            DrawText(names[c], (int)cell.x + 20, cy + 16, 22, labelC);
+            for (int p = 0; p < 3; p++) {
+                Color pc = p < lv ? si.col : C(52, 46, 62);
+                DrawRectangle((int)cell.x + 20 + p * 28, cy + 50, 22, 15, pc);
+            }
+            DrawText(lv >= 3 ? "MAX" : "1 pt", (int)cell.x + 20, cy + 72, 16,
+                     lv >= 3 ? Fade(si.col, 0.9f) : labelC);
+        } else {
+            DrawText("MASTERY", (int)cell.x + 20, cy + 16, 22,
+                     lv > 0 ? C(255, 215, 120) : labelC);
+            if (lv > 0)
+                DrawText("UNLOCKED", (int)cell.x + 20, cy + 54, 16, C(255, 215, 120));
+            else
+                DrawText("2 pts", (int)cell.x + 20, cy + 72, 16, labelC);
+        }
+        if (sel)
+            DrawRectangleLinesEx(cell, 2, C(255, 215, 120));
+    }
+
+    // footer: what does the selected cell do?
+    int fy = cy + cellH + 34;
+    const char* desc = (selCol < 3) ? TRACK_DESC[selCol] : MASTERY_DESC[s];
+    CText(desc, fy, 18, C(215, 210, 225));
+
+    // Hashira masteries grow on their own, through battles fought together
     int nxt = giyu.mastery.NextThreshold();
     if (nxt < 0)
         CText(TextFormat("GIYU MASTERY  LV %d  -  %d xp  (MAX - an elite Hashira)",
-              giyu.mastery.Level(), giyu.mastery.xp), fy + 48, 14, C(120, 190, 255));
+              giyu.mastery.Level(), giyu.mastery.xp), fy + 40, 14, C(120, 190, 255));
     else
         CText(TextFormat("GIYU MASTERY  LV %d  -  %d xp  (next level at %d - fight beside him)",
-              giyu.mastery.Level(), giyu.mastery.xp, nxt), fy + 48, 14, C(120, 190, 255));
+              giyu.mastery.Level(), giyu.mastery.xp, nxt), fy + 40, 14, C(120, 190, 255));
     int snxt = shinobu.mastery.NextThreshold();
     if (snxt < 0)
         CText(TextFormat("SHINOBU MASTERY  LV %d  -  %d xp  (MAX - wisteria bloom)",
-              shinobu.mastery.Level(), shinobu.mastery.xp), fy + 66, 14, C(190, 150, 255));
+              shinobu.mastery.Level(), shinobu.mastery.xp), fy + 60, 14, C(190, 150, 255));
     else
         CText(TextFormat("SHINOBU MASTERY  LV %d  -  %d xp  (next level at %d - poison demons)",
-              shinobu.mastery.Level(), shinobu.mastery.xp, snxt), fy + 66, 14, C(190, 150, 255));
+              shinobu.mastery.Level(), shinobu.mastery.xp, snxt), fy + 60, 14, C(190, 150, 255));
     int rnxt = rengoku.mastery.NextThreshold();
     if (rnxt < 0)
         CText(TextFormat("RENGOKU MASTERY  LV %d  -  %d xp  (MAX - Ninth Form)",
-              rengoku.mastery.Level(), rengoku.mastery.xp), fy + 84, 14, C(255, 150, 55));
+              rengoku.mastery.Level(), rengoku.mastery.xp), fy + 80, 14, C(255, 150, 55));
     else
         CText(TextFormat("RENGOKU MASTERY  LV %d  -  %d xp  (next level at %d - burn bright)",
-              rengoku.mastery.Level(), rengoku.mastery.xp, rnxt), fy + 84, 14, C(255, 150, 55));
+              rengoku.mastery.Level(), rengoku.mastery.xp, rnxt), fy + 80, 14, C(255, 150, 55));
 }
 
 void Game::DrawOverlays() const {
@@ -1301,18 +1565,21 @@ void Game::DrawOverlays() const {
         CText("Survive the waves. Grow stronger. Hold Muzan until sunrise.", 234, 18, C(200, 195, 210));
 
         CText("A / D - move    W / SPACE - jump    SHIFT - crouch    J - combo    UP+J launcher    DOWN+J plunge", 300, 15, C(210, 220, 235));
-        CText("K WATER - flowing multi-hit dash        L FIRE - explosive burst", 342, 15, C(120, 190, 255));
-        CText("I STONE - guard-crushing slam           O LOVE - healing dance", 368, 15, C(255, 150, 205));
-        CText("U SERPENT - venomous weaving flurry     H WIND - sweeping tornadoes", 394, 15, C(140, 220, 120));
-        CText("M MIST - vanish, blink, ambush from the fog", 420, 15, C(185, 195, 215));
+        CText("WATER - flowing multi-hit dash        FIRE - explosive burst", 342, 15, C(120, 190, 255));
+        CText("STONE - guard-crushing slam           LOVE - healing dance", 368, 15, C(255, 150, 205));
+        CText("SERPENT - venomous weaving flurry     WIND - sweeping tornadoes", 394, 15, C(140, 220, 120));
+        CText("MIST - vanish, blink, ambush from the fog   (your one style fires on 1)", 420, 15, C(185, 195, 215));
         CText("G - summon GIYU TOMIOKA, the Water Hashira. if he falls, he is gone for the run", 446, 15, C(120, 190, 255));
         CText("B - summon SHINOBU KOCHO, the Insect Hashira. poison, triage, and wisteria", 472, 15, C(190, 150, 255));
         CText("R - summon KYOJURO RENGOKU, the Flame Hashira. burst damage and openings", 498, 15, C(255, 150, 55));
         CText("Clear waves to earn points - press TAB in battle to upgrade your styles", 528, 16, C(255, 215, 120));
-        CText("P - pause      F8 - dev invincible      F11 - fullscreen", 558, 14, C(150, 150, 165));
+        CText("S - settings (keybinds & volume)      P / ESC - pause      F8 - dev invincible      F11 - fullscreen", 558, 14, C(150, 150, 165));
 
         if (fmodf(gt, 1.2f) < 0.75f)
-            CText("PRESS  ENTER  TO  BEGIN", 610, 26, C(240, 210, 130));
+            CText("PRESS  ENTER  TO  CHOOSE  YOUR  BREATHING  STYLE", 610, 26, C(240, 210, 130));
+    }
+    else if (state == GState::StyleSelect) {
+        DrawStyleSelect();
     }
     else if (state == GState::Playing && bannerT > 0 && !boss.active) {
         float a = Clampf(bannerT / 0.5f, 0, 1);
@@ -1388,9 +1655,25 @@ void Game::DrawOverlays() const {
         }
     }
     else if (state == GState::Paused) {
-        DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(BLACK, 0.5f));
-        CText("PAUSED", 300, 50, C(230, 225, 235));
-        CText("P - resume", 380, 20, C(180, 175, 190));
+        DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(BLACK, 0.72f));
+        CText("PAUSED", 190, 56, C(235, 225, 235));
+
+        const char* opts[3] = { "RESUME", "SETTINGS", "QUIT TO MAIN MENU" };
+        for (int i = 0; i < 3; i++) {
+            bool sel = (pauseSel == i);
+            float bw = 460, bh = 58;
+            Rectangle b = { cfg::SCREEN_W * 0.5f - bw * 0.5f, 300.0f + i * 78.0f, bw, bh };
+            DrawRectangleRounded(b, 0.28f, 6, sel ? C(48, 40, 58) : C(26, 22, 32));
+            if (sel) DrawRectangleLinesEx(b, 2, C(255, 215, 120));
+            int tw = MeasureText(opts[i], 26);
+            DrawText(opts[i], (int)(cfg::SCREEN_W * 0.5f - tw / 2), (int)b.y + 16, 26,
+                     sel ? C(255, 225, 150) : C(210, 205, 218));
+        }
+        CText("UP / DOWN - choose      ENTER - select      ESC / P - resume", 566, 18,
+              C(170, 165, 185));
+    }
+    else if (state == GState::Settings) {
+        DrawSettings();
     }
     else if (state == GState::Upgrade) {
         DrawUpgradeMenu();
@@ -1450,13 +1733,15 @@ void Game::Draw() {
     giyu.Draw();
     shinobu.Draw();
     rengoku.Draw();
-    if (state != GState::Title) player.Draw();
+    bool inMenu = state == GState::Title || state == GState::StyleSelect ||
+                  state == GState::Settings;
+    if (!inMenu) player.Draw();
     fx.DrawWorld();
     fx.DrawTexts();
     EndMode2D();
 
     DrawVignette();
     fx.DrawScreen();        // dark flashes / crescent bursts, over the world
-    if (state != GState::Title) DrawUI();
+    if (!inMenu) DrawUI();
     DrawOverlays();
 }
