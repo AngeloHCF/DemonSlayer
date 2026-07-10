@@ -275,6 +275,98 @@ void Effects::WaterBurst(Vector2 p) {
     Ring(p, 6, 90, 380, 5, C(210, 240, 255));
 }
 
+void Effects::WaterWake(Vector2 p, int facing, float scale) {
+    int n = (int)(8 * scale);
+    for (int i = 0; i < n; i++) {
+        Particle pt;
+        pt.pos = { p.x - facing * frnd(4, 48) * scale, p.y + frnd(-28, 20) * scale };
+        pt.vel = { -facing * frnd(220, 620) * scale, frnd(-145, 45) * scale };
+        pt.maxLife = pt.life = frnd(0.18f, 0.42f);
+        pt.size0 = frnd(2.5f, 6.5f) * scale; pt.size1 = 0;
+        pt.c0 = C(105, 190, 255, 210); pt.c1 = C(210, 245, 255, 0);
+        pt.grav = 260; pt.drag = 2.6f; pt.shape = (i % 3 == 0) ? 0 : 1;
+        Push(pt);
+    }
+
+    int foam = (int)(4 * scale);
+    for (int i = 0; i < foam; i++) {
+        Particle pt;
+        pt.pos = { p.x - facing * frnd(10, 42) * scale, p.y + frnd(2, 22) * scale };
+        pt.vel = { -facing * frnd(120, 360) * scale, frnd(-70, 10) };
+        pt.maxLife = pt.life = frnd(0.16f, 0.32f);
+        pt.size0 = frnd(1.5f, 3.5f) * scale; pt.size1 = 0;
+        pt.c0 = C(230, 250, 255, 220); pt.c1 = C(170, 225, 255, 0);
+        pt.grav = 180; pt.drag = 2.0f; pt.shape = 1;
+        Push(pt);
+    }
+}
+
+void Effects::WaterSlashWave(Vector2 p, int facing, float length, float height, float scale) {
+    int n = (int)(16 * scale);
+    for (int i = 0; i < n; i++) {
+        float t = (i + frnd(-0.15f, 0.15f)) / fmaxf((float)(n - 1), 1.0f);
+        t = Clampf(t, 0, 1);
+        float crest = sinf(t * PI);
+        Particle pt;
+        pt.pos = { p.x + facing * length * t + frnd(-6, 6) * scale,
+                   p.y - crest * height + frnd(-8, 8) * scale };
+        pt.vel = { facing * frnd(160, 470) * scale, frnd(-120, 90) * scale };
+        pt.maxLife = pt.life = frnd(0.16f, 0.36f);
+        pt.size0 = frnd(3.0f, 7.0f) * scale; pt.size1 = 0;
+        pt.c0 = (i % 3 == 0) ? C(230, 250, 255, 230) : C(90, 180, 255, 220);
+        pt.c1 = C(160, 225, 255, 0);
+        pt.drag = 2.4f; pt.shape = 1;
+        Push(pt);
+    }
+}
+
+void Effects::WaterSpiral(Vector2 p, float radius, float spin, float scale) {
+    int n = (int)(5 * scale);
+    for (int i = 0; i < n; i++) {
+        float a = frnd(0, 360) * DEG2RAD;
+        float r = radius * frnd(0.35f, 1.0f);
+        Vector2 dir = { cosf(a), sinf(a) };
+        Vector2 tangent = { -dir.y * spin, dir.x * spin };
+        Particle pt;
+        pt.pos = { p.x + dir.x * r, p.y + dir.y * r * 0.62f };
+        pt.vel = { tangent.x * frnd(170, 360) * scale + dir.x * frnd(-80, 120),
+                   tangent.y * frnd(170, 360) * scale + dir.y * frnd(-40, 90) };
+        pt.maxLife = pt.life = frnd(0.18f, 0.42f);
+        pt.size0 = frnd(2.5f, 6.0f) * scale; pt.size1 = 0;
+        pt.c0 = C(110, 200, 255, 205); pt.c1 = C(220, 250, 255, 0);
+        pt.grav = -25; pt.drag = 2.1f; pt.shape = 1;
+        Push(pt);
+    }
+}
+
+void Effects::WaterColumn(Vector2 p, float height, float width, float scale) {
+    int n = (int)(18 * scale);
+    for (int i = 0; i < n; i++) {
+        Particle pt;
+        pt.pos = { p.x + frnd(-width * 0.5f, width * 0.5f),
+                   p.y - frnd(0, height) };
+        pt.vel = { frnd(-40, 40) * scale, frnd(380, 820) * scale };
+        pt.maxLife = pt.life = frnd(0.18f, 0.42f);
+        pt.size0 = frnd(3, 7) * scale; pt.size1 = 0;
+        pt.c0 = (i % 4 == 0) ? C(235, 252, 255, 230) : C(90, 180, 255, 210);
+        pt.c1 = C(150, 220, 255, 0);
+        pt.grav = 140; pt.drag = 0.8f; pt.shape = 1;
+        Push(pt);
+    }
+    for (int i = 0; i < (int)(6 * scale); i++) {
+        Particle pt;
+        pt.pos = { p.x + frnd(-width * 0.6f, width * 0.6f), p.y + frnd(-8, 8) };
+        pt.vel = { frnd(-260, 260) * scale, frnd(-230, -40) * scale };
+        pt.maxLife = pt.life = frnd(0.2f, 0.45f);
+        pt.size0 = frnd(2, 5) * scale; pt.size1 = 0;
+        pt.c0 = C(220, 245, 255, 220); pt.c1 = C(150, 215, 255, 0);
+        pt.grav = 380; pt.drag = 1.5f; pt.shape = 0;
+        Push(pt);
+    }
+    if (scale >= 0.5f)
+        Ring(p, 6 * scale, width * 1.15f, 450, 5 * scale, C(150, 210, 255));
+}
+
 void Effects::SerpentTrail(Vector2 p, int facing) {
     for (int i = 0; i < 3; i++) {
         bool venom = (GetRandomValue(0, 1) == 0);

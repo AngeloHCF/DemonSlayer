@@ -63,14 +63,68 @@ struct StyleUpgrades {
     bool mastery = false;
 };
 
+// ---------------------------------------------------------------
+// Water Breathing — eleven forms, each an independent ability that
+// levels 1..5 on its own. Players start every run at Level 1 in all
+// forms and spend upgrade points to specialise the techniques they
+// use most. Level 5 is full mastery (peak damage/reach, min cooldown,
+// enhanced visuals, and a signature bonus property per form).
+// ---------------------------------------------------------------
+enum WaterForm {
+    WF_SURFACE_SLASH,   // 1  Water Surface Slash
+    WF_WATER_WHEEL,     // 2  Water Wheel
+    WF_FLOWING_DANCE,   // 3  Flowing Dance
+    WF_STRIKING_TIDE,   // 4  Striking Tide
+    WF_BLESSED_RAIN,    // 5  Blessed Rain After the Drought
+    WF_WHIRLPOOL,       // 6  Whirlpool
+    WF_DROP_RIPPLE,     // 7  Drop Ripple Thrust
+    WF_WATERFALL_BASIN, // 8  Waterfall Basin
+    WF_SPLASHING_FLOW,  // 9  Splashing Water Flow, Turbulent
+    WF_CONSTANT_FLUX,   // 10 Constant Flux
+    WF_DEAD_CALM,       // 11 Dead Calm
+    WATER_FORM_COUNT
+};
+
+// base cooldown (seconds) per form, before the per-level reduction.
+// shared by the player (execution) and game (HUD ring / menu display).
+inline float WaterFormBaseCd(int f) {
+    static const float cd[WATER_FORM_COUNT] = {
+        1.2f, 3.0f, 4.0f, 2.6f, 5.0f, 3.6f, 1.8f, 3.2f, 4.6f, 6.5f, 9.0f
+    };
+    return (f >= 0 && f < WATER_FORM_COUNT) ? cd[f] : 1.0f;
+}
+
+struct WaterForms {
+    int level[WATER_FORM_COUNT];   // 1..5 (never 0)
+
+    WaterForms() { Reset(); }
+    void Reset()   { for (int i = 0; i < WATER_FORM_COUNT; i++) level[i] = 1; }
+    void MaxAll()  { for (int i = 0; i < WATER_FORM_COUNT; i++) level[i] = 5; }
+
+    int  Level(int f) const { return (f >= 0 && f < WATER_FORM_COUNT) ? level[f] : 1; }
+    bool Maxed(int f) const { return Level(f) >= 5; }
+
+    // raising a form from level L costs L points (1,2,3,4 -> 10 to fully master)
+    int  Cost(int f) const { return Level(f); }
+    bool CanUpgrade(int f, int points) const { return !Maxed(f) && points >= Cost(f); }
+
+    // per-level scaling knobs (Level 1 = baseline, Level 5 = mastery)
+    float DmgMult(int f)   const { return 1.0f + 0.28f * (Level(f) - 1); } // -> 2.12x
+    float RangeMult(int f) const { return 1.0f + 0.11f * (Level(f) - 1); } // -> 1.44x
+    float CdMult(int f)    const { return 1.0f - 0.10f * (Level(f) - 1); } // -> 0.60x
+    float SpeedMult(int f) const { return 1.0f + 0.09f * (Level(f) - 1); } // -> 1.36x
+};
+
 class Progression {
 public:
     int points = 0;
     StyleUpgrades up[STYLE_COUNT];
+    WaterForms water;                 // Water Breathing's eleven per-form levels
 
     void Reset() {
         points = 0;
         for (int i = 0; i < STYLE_COUNT; i++) up[i] = StyleUpgrades{};
+        water.Reset();                // every run begins at Level 1 in each form
     }
 
     void UnlockAll() {
@@ -81,6 +135,7 @@ public:
             up[i].reach = 3;
             up[i].mastery = true;
         }
+        water.MaxAll();
     }
 
     float DmgMult(int s) const   { return 1.0f + 0.30f * up[s].power; }

@@ -19,7 +19,7 @@ class Effects;
 
 enum class PState {
     Normal, Attack, UpSlash, Plunge,
-    Water, FireWindup, FireRecover, Stone, Love,
+    Water, WaterForm, FireWindup, FireRecover, Stone, Love,
     Serpent, Wind, Mist,
     Hurt, Dead
 };
@@ -63,7 +63,16 @@ public:
     float hp = 0, maxHp = 0;
     float cd[STYLE_COUNT] = {};  // per-style cooldown timers
     int   equipped = STYLE_WATER; // the one Breathing Style carried into this run
+    float waterCd[WATER_FORM_COUNT] = {}; // per-form cooldowns (Water Breathing)
+    int   waterForm = -1;        // active Water form while in PState::WaterForm
     float iframes = 0;
+
+    // Eleventh Form: Dead Calm nullifies enemy attacks in a zone around the
+    // player. Game::ResolveCombat queries these each frame.
+    bool  DeadCalmActive() const { return deadCalmT > 0; }
+    Rectangle DeadCalmZone() const {
+        return { pos.x - 130, pos.y - 120, 260, 200 };
+    }
     HitMemory hitMem;            // enemy attack ids that already connected
     PState state = PState::Normal;
     bool onGround = false;
@@ -83,6 +92,10 @@ private:
     void StartCombo(int stage);
     void UpdateAttack(float dt, CombatSystem& cs, Effects& fx);
     void UpdateTechs(float dt, CombatSystem& cs, Effects& fx);
+    // Water Breathing: try to start a form from its number key; run the active
+    // form's state machine each frame.
+    bool TryStartWaterForm(CombatSystem& cs, Effects& fx);
+    void UpdateWaterForm(float dt, CombatSystem& cs, Effects& fx);
     // central hitbox spawner: applies style damage upgrades + mist ambush
     void AddHit(CombatSystem& cs, Effects& fx, Rectangle r, float dmg,
                 float kbx, float kby, float life, HitKind kind, int id, int style);
@@ -101,6 +114,9 @@ private:
     int   loveSeg = 0;
     float serpentTick = 0;
     float mistAmbushT = 0;       // next strike from the mist deals double
+    int   formSeg = 0;           // segment counter for multi-hit Water forms
+    float formTick = 0;          // re-arm timer for multi-hit Water forms
+    float deadCalmT = 0;         // Dead Calm nullification window remaining
     float hurtLen = 0.28f;       // current hitstun duration
     float hurtFlash = 0;
     float runPhase = 0;

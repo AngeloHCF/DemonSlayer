@@ -50,6 +50,10 @@ public:
     void StoneSlam(Vector2 p);
     void LoveSparkle(Vector2 p, int facing);
     void WaterBurst(Vector2 p);
+    void WaterWake(Vector2 p, int facing, float scale = 1.0f);
+    void WaterSlashWave(Vector2 p, int facing, float length, float height, float scale = 1.0f);
+    void WaterSpiral(Vector2 p, float radius, float spin, float scale = 1.0f);
+    void WaterColumn(Vector2 p, float height, float width, float scale = 1.0f);
     void SerpentTrail(Vector2 p, int facing);
     void WindSpiral(Vector2 p);
     void MistBurst(Vector2 p);

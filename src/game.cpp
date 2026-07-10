@@ -30,7 +30,7 @@ static const float STYLE_CD_BASE[STYLE_COUNT] = {
 };
 // one-line blurbs for the Breathing Style selection menu
 static const char* STYLE_DESC[STYLE_COUNT] = {
-    "flowing multi-hit dash with long invulnerability",
+    "eleven forms - each its own ability, leveled independently",
     "explosive forward burst of flame",
     "guard-crushing ground slam",
     "healing dance of blades",
@@ -51,6 +51,25 @@ static const char* TRACK_DESC[3] = {
     "POWER - +30% damage per level",
     "FLOW - -18% cooldown per level",
     "REACH - +20% range, duration & technique speed per level",
+};
+
+// Water Breathing's eleven forms: display name + the key that fires each, plus a
+// one-line role. Order matches enum WaterForm. Keys are 1-9, then 0 and -.
+static const char* WATER_FORM_KEYLABEL[WATER_FORM_COUNT] =
+    { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-" };
+struct WaterFormInfo { const char* name; const char* role; };
+static const WaterFormInfo WATER_FORMS[WATER_FORM_COUNT] = {
+    { "Water Surface Slash",              "swift clean cut - your quick, low-cooldown strike" },
+    { "Water Wheel",                      "forward somersault; the blade carves a full circle" },
+    { "Flowing Dance",                    "a gliding chain of graceful multi-hit slashes" },
+    { "Striking Tide",                    "rapid consecutive strikes rooted in place" },
+    { "Blessed Rain After the Drought",   "one merciful, decisive cut that also heals you" },
+    { "Whirlpool",                        "spin in place; drag the horde inward and shred it" },
+    { "Drop Ripple Thrust",               "the fastest, most direct piercing lunge" },
+    { "Waterfall Basin",                  "leap and crash a column of water straight down" },
+    { "Splashing Water Flow, Turbulent",  "a defensive churn; weather blows unharmed" },
+    { "Constant Flux",                    "the river flows back and forth through the line" },
+    { "Dead Calm",                        "total stillness; nullify incoming attacks, then release" },
 };
 
 void Game::Init() {
@@ -572,6 +591,21 @@ void Game::SeparateEnemies(float dt) {
 }
 
 void Game::ResolveCombat() {
+    // Eleventh Form: Dead Calm — enemy attacks inside the still-water zone are
+    // nullified before they can land.
+    if (player.DeadCalmActive()) {
+        Rectangle z = player.DeadCalmZone();
+        for (auto& hb : combat.Boxes()) {
+            if (hb.team == Team::Enemy && hb.life > 0 &&
+                CheckCollisionRecs(hb.rect, z)) {
+                hb.life = 0;
+                fx.Sparks({ hb.rect.x + hb.rect.width * 0.5f,
+                            hb.rect.y + hb.rect.height * 0.5f },
+                          -90, 130, 5, C(170, 215, 245), 200, 2.5f);
+            }
+        }
+    }
+
     for (auto& hb : combat.Boxes()) {
         if (hb.life <= 0) continue;      // nullified (Dead Calm) or expired
         if (hb.team == Team::Player) {
@@ -1100,6 +1134,24 @@ void Game::UpdateUpgradeMenu() {
         state = GState::Playing;
         return;
     }
+    // Water Breathing levels its eleven forms independently (one row per form)
+    if (player.equipped == STYLE_WATER) {
+        if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S))
+            selRow = (selRow + 1) % WATER_FORM_COUNT;
+        if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W))
+            selRow = (selRow + WATER_FORM_COUNT - 1) % WATER_FORM_COUNT;
+        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_J)) {
+            int f = selRow;
+            if (prog.water.CanUpgrade(f, prog.points)) {
+                prog.points -= prog.water.Cost(f);
+                prog.water.level[f]++;
+                PlaySfx(SFX_UPGRADE, 0.9f);
+            } else {
+                PlaySfx(SFX_PICKUP, 0.35f, 0.5f);
+            }
+        }
+        return;
+    }
     // upgrades only apply to the equipped style; row navigation is disabled
     selRow = player.equipped;
     if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D))
@@ -1376,6 +1428,25 @@ static void DrawAbilityIcon(int x, int y, const char* key, const char* name,
     DrawText(name, x + 17, y + 54, 13, Fade(col, 0.9f));
 }
 
+// compact icon for one Water form: key label, cooldown fill, and 1-5 level pips
+static void DrawFormIcon(int x, int y, const char* key, float cdT, float cdMax,
+                         int level, Color col, bool maxed) {
+    Rectangle box = { (float)x, (float)y, 40, 40 };
+    DrawRectangleRounded(box, 0.22f, 4, C(22, 18, 26));
+    DrawRectangleRounded({ box.x + 3, box.y + 3, 34, 34 }, 0.22f, 4,
+                         Fade(col, cdT > 0 ? 0.30f : 1.0f));
+    if (cdT > 0) {
+        float f = cdT / fmaxf(cdMax, 0.01f);
+        DrawRectangleRounded({ box.x + 3, box.y + 3 + 34 * (1 - f), 34, 34 * f }, 0.22f, 4,
+                             Fade(BLACK, 0.55f));
+    }
+    DrawText(key, x + 5, y + 3, 14, C(232, 236, 246));
+    if (maxed) DrawText("*", x + 28, y + 1, 16, C(255, 215, 120));
+    for (int i = 0; i < 5; i++)
+        DrawRectangle(x + 3 + i * 7, y + 42, 5, 3,
+                      i < level ? (maxed ? C(255, 215, 120) : col) : C(45, 40, 52));
+}
+
 void Game::DrawUI() const {
     // player HP
     DrawRectangleRounded({ 20, 18, 264, 26 }, 0.4f, 6, C(20, 16, 24));
@@ -1386,7 +1457,16 @@ void Game::DrawUI() const {
     DrawText(TextFormat("%d / %d", (int)player.hp, (int)player.maxHp), 30, 24, 14, C(10, 12, 14));
 
     // equipped breathing style (only the chosen style is available this run)
-    {
+    if (player.equipped == STYLE_WATER) {
+        // Water Breathing shows all eleven forms with their own cooldowns/levels
+        Color wc = STYLE_INFO[STYLE_WATER].col;
+        for (int i = 0; i < WATER_FORM_COUNT; i++) {
+            float cdMax = WaterFormBaseCd(i) * prog.water.CdMult(i);
+            DrawFormIcon(20 + i * 44, 56, WATER_FORM_KEYLABEL[i], player.waterCd[i], cdMax,
+                         prog.water.Level(i), wc, prog.water.Maxed(i));
+        }
+        DrawText("WATER BREATHING - 11 FORMS", 20, 104, 14, Fade(wc, 0.9f));
+    } else {
         int es = player.equipped;
         const StyleUpgrades& u = prog.up[es];
         DrawAbilityIcon(20, 56, STYLE_INFO[es].key, STYLE_INFO[es].shortName,
@@ -1833,6 +1913,49 @@ void Game::DrawSettings() const {
 
 void Game::DrawUpgradeMenu() const {
     DrawRectangle(0, 0, cfg::SCREEN_W, cfg::SCREEN_H, Fade(BLACK, 0.82f));
+
+    // Water Breathing: eleven forms, each leveled independently 1..5
+    if (player.equipped == STYLE_WATER) {
+        Color wc = STYLE_INFO[STYLE_WATER].col;
+        CText("WATER  BREATHING  -  FORM  MASTERY", 34, 34, C(235, 225, 235));
+        DrawText(TextFormat("POINTS  %d", prog.points), cfg::SCREEN_W - 230, 36, 28,
+                 C(255, 215, 120));
+        CText("UP / DOWN - choose form      ENTER - level up      TAB - return to battle",
+              78, 15, C(170, 165, 185));
+
+        const int y0 = 112, rh = 42;
+        for (int i = 0; i < WATER_FORM_COUNT; i++) {
+            int y = y0 + i * rh;
+            bool sel = (selRow == i);
+            int lv = prog.water.Level(i);
+            bool mx = prog.water.Maxed(i);
+            Rectangle row = { 40, (float)y, (float)(cfg::SCREEN_W - 80), (float)(rh - 6) };
+            DrawRectangleRounded(row, 0.14f, 4, sel ? C(46, 40, 56) : C(26, 22, 32));
+            if (sel) DrawRectangleLinesEx(row, 2, C(255, 215, 120));
+
+            DrawText(TextFormat("%2d", i + 1), 56, y + 7, 22, Fade(wc, 0.95f));
+            DrawText(WATER_FORMS[i].name, 100, y + 9, 20, mx ? C(255, 225, 150) : C(228, 223, 235));
+            DrawText(TextFormat("KEY %s", WATER_FORM_KEYLABEL[i]), 610, y + 12, 14,
+                     C(150, 150, 165));
+            for (int p = 0; p < 5; p++)
+                DrawRectangle(752 + p * 22, y + 11, 17, 15,
+                              p < lv ? (mx ? C(255, 215, 120) : wc) : C(52, 46, 62));
+            if (mx)
+                DrawText("MAX", cfg::SCREEN_W - 118, y + 9, 18, C(255, 215, 120));
+            else {
+                bool afford = prog.points >= prog.water.Cost(i);
+                DrawText(TextFormat("%d pt", prog.water.Cost(i)), cfg::SCREEN_W - 118, y + 11, 16,
+                         afford ? C(210, 205, 225) : C(120, 115, 135));
+            }
+        }
+
+        int fy = y0 + WATER_FORM_COUNT * rh + 6;
+        CText(WATER_FORMS[selRow].role, fy, 17, C(216, 211, 226));
+        CText(TextFormat("LEVEL  %d / 5   -   each level: more damage, reach, speed & lower cooldown",
+              prog.water.Level(selRow)), fy + 24, 14, Fade(wc, 0.9f));
+        return;
+    }
+
     CText("BREATHING  MASTERY", 40, 40, C(235, 225, 235));
     DrawText(TextFormat("POINTS  %d", prog.points), cfg::SCREEN_W - 230, 42, 28, C(255, 215, 120));
     CText("LEFT / RIGHT - choose upgrade      ENTER - purchase      TAB - return to battle",

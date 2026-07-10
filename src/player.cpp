@@ -34,6 +34,8 @@ void Player::Reset(Vector2 spawn) {
     facing = 1;
     maxHp = cfg::P_MAX_HP; hp = maxHp;
     for (int i = 0; i < STYLE_COUNT; i++) cd[i] = 0;
+    for (int i = 0; i < WATER_FORM_COUNT; i++) waterCd[i] = 0;
+    waterForm = -1; formSeg = 0; formTick = 0; deadCalmT = 0;
     iframes = 0;
     hitMem.Clear();
     state = PState::Normal;
@@ -167,6 +169,357 @@ void Player::UpdateTechs(float dt, CombatSystem& cs, Effects& fx) {
                  [](const Ghost& g) { return g.life <= 0; }), ghosts.end());
 }
 
+// --- Water Breathing: eleven forms ------------------------------------------
+bool Player::TryStartWaterForm(CombatSystem& cs, Effects& fx) {
+    static const int FKEY[WATER_FORM_COUNT] = {
+        KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR, KEY_FIVE,
+        KEY_SIX, KEY_SEVEN, KEY_EIGHT, KEY_NINE, KEY_ZERO, KEY_MINUS
+    };
+    static const char* FORM_CALL[WATER_FORM_COUNT] = {
+        "SURFACE SLASH", "WATER WHEEL", "FLOWING DANCE", "STRIKING TIDE",
+        "BLESSED RAIN", "WHIRLPOOL", "DROP RIPPLE", "WATERFALL BASIN",
+        "SPLASHING FLOW", "CONSTANT FLUX", "DEAD CALM"
+    };
+    int f = -1;
+    for (int i = 0; i < WATER_FORM_COUNT; i++)
+        if (IsKeyPressed(FKEY[i])) { f = i; break; }
+    if (f < 0) return false;
+    if (waterCd[f] > 0) { PlaySfx(SFX_PICKUP, 0.22f, 0.55f); return false; }  // on cooldown
+
+    waterForm = f;
+    state = PState::WaterForm;
+    stateTimer = 0; didHitFrame = false; formSeg = 0; formTick = 0;
+    multiAttackId = cs.NewId();
+    waterCd[f] = WaterFormBaseCd(f) * (prog ? prog->water.CdMult(f) : 1.0f);
+    int lv = prog ? prog->water.Level(f) : 1;
+    float flair = 0.85f + 0.12f * (lv - 1);
+
+    // startup: face the target for pursuit forms, grant iframes to dash forms
+    switch (f) {
+        case WF_DROP_RIPPLE:
+            if (hasHunt) facing = huntX > pos.x ? 1 : -1;
+            iframes = fmaxf(iframes, 0.30f);
+            break;
+        case WF_CONSTANT_FLUX:  iframes = fmaxf(iframes, 0.42f); break;
+        case WF_WATER_WHEEL:
+        case WF_FLOWING_DANCE:  iframes = fmaxf(iframes, 0.26f); break;
+        case WF_SPLASHING_FLOW:
+        case WF_DEAD_CALM:      iframes = fmaxf(iframes, 0.20f); break;
+        default: break;
+    }
+    fx.Text({ pos.x, pos.y - h - 18 }, C(165, 220, 255), 0.92f, "%s", FORM_CALL[f]);
+    fx.WaterBurst({ pos.x + facing * 22.0f, pos.y - 4 });
+    fx.WaterWake(pos, facing, flair);
+    if (lv >= 5) fx.Ring(pos, 12, 86, 500, 6, C(200, 240, 255));
+    PlaySfx(SFX_WATER, 0.35f, 1.0f + 0.03f * f);
+    return true;
+}
+
+void Player::UpdateWaterForm(float dt, CombatSystem& cs, Effects& fx) {
+    stateTimer += dt;
+    if (!prog) { state = PState::Normal; return; }
+    WaterForms& wf = prog->water;
+    const int   f    = waterForm;
+    const float dmgM = wf.DmgMult(f);
+    const float rngM = wf.RangeMult(f);
+    const float spdM = wf.SpeedMult(f);
+    const int   lv   = wf.Level(f);
+    const bool  maxed = wf.Maxed(f);
+    const float flair = 0.85f + 0.12f * (lv - 1);
+    const Color WCOL = C(120, 200, 255);
+    vel.y = 0;                        // horizontal by default; vertical forms override
+
+    switch (f) {
+    // 1 — Water Surface Slash: a swift, clean horizontal cut with a short lunge
+    case WF_SURFACE_SLASH: {
+        if (stateTimer < 0.07f) {
+            vel.x = facing * 360.0f * spdM;
+            fx.WaterWake(pos, facing, 0.65f * flair);
+        }
+        else vel.x *= 1.0f - Clampf(12.0f * dt, 0, 1);
+        if (!didHitFrame && stateTimer >= 0.07f) {
+            didHitFrame = true;
+            float range = 98.0f * rngM;
+            Rectangle r = { facing > 0 ? pos.x + 4 : pos.x - 4 - range, pos.y - 40, range, 80 };
+            AddHit(cs, fx, r, 24.0f * dmgM, facing * 300, -150, 0.06f, HitKind::Water, cs.NewId(), -1);
+            float a0 = facing > 0 ? -70.0f : 250.0f, a1 = facing > 0 ? 70.0f : 110.0f;
+            fx.SlashArc(pos, range * 0.9f, a0, a1, WCOL);
+            fx.WaterSlashWave({ pos.x + facing * 10.0f, pos.y + 8.0f }, facing, range * 1.15f, 46.0f, flair);
+            fx.WaterBurst({ pos.x + facing * 42.0f, pos.y - 6 });
+            fx.Ring({ pos.x + facing * 36.0f, pos.y }, 6, 78.0f * rngM, 620, 4, C(190, 235, 255));
+            fx.AddHitstop(0.03f); PlaySfx(SFX_WATER, 0.7f, 1.25f);
+        }
+        // Level 5: a second surface cut flows straight out of the first
+        if (maxed && formSeg == 0 && stateTimer >= 0.16f) {
+            formSeg = 1;
+            float range = 118.0f * rngM;
+            Rectangle r = { facing > 0 ? pos.x + 4 : pos.x - 4 - range, pos.y - 44, range, 88 };
+            AddHit(cs, fx, r, 18.0f * dmgM, facing * 340, -180, 0.06f, HitKind::Water, cs.NewId(), -1);
+            float a0 = facing > 0 ? 70.0f : 110.0f, a1 = facing > 0 ? -70.0f : 250.0f;
+            fx.SlashArc(pos, range * 0.9f, a0, a1, C(180, 225, 255));
+            fx.WaterSlashWave({ pos.x + facing * 12.0f, pos.y - 4.0f }, facing, range * 1.2f, 34.0f, 1.15f * flair);
+            fx.WaterWake(pos, facing, 1.1f * flair);
+            PlaySfx(SFX_WATER, 0.6f, 1.4f);
+        }
+        if (stateTimer >= (maxed ? 0.34f : 0.26f)) state = PState::Normal;
+        break;
+    }
+    // 2 — Water Wheel: a forward somersault, the blade carving a full circle
+    case WF_WATER_WHEEL: {
+        float dur = 0.5f / spdM;
+        vel.x = facing * 380.0f * spdM;
+        vel.y = -sinf(Clampf(stateTimer / dur, 0, 1) * PI) * 520.0f;   // rise then fall
+        formTick -= dt;
+        if (formTick <= 0) { formTick = 0.08f; multiAttackId = cs.NewId(); }
+        float R = 72.0f * rngM;
+        Rectangle r = { pos.x - R, pos.y - R, R * 2, R * 2 };
+        AddHit(cs, fx, r, 16.0f * dmgM, facing * 200, maxed ? -380 : -140, 0.05f,
+               HitKind::Water, multiAttackId, -1);
+        fx.WaterTrail(pos, facing);
+        fx.WaterSpiral(pos, R * 0.95f, (float)facing, 0.8f * flair);
+        if (fmodf(stateTimer, 0.09f) < dt) {
+            fx.Ring(pos, R * 0.35f, R * 1.2f, 340, maxed ? 8 : 5, WCOL);
+            if (maxed) fx.WaterWake(pos, facing, 0.8f * flair);
+        }
+        if (stateTimer >= dur) { state = PState::Normal; }
+        break;
+    }
+    // 3 — Flowing Dance: a gliding chain of graceful slashes
+    case WF_FLOWING_DANCE: {
+        vel.x = facing * 560.0f * spdM;
+        vel.y = sinf(stateTimer * 26.0f) * 55.0f;
+        formTick -= dt;
+        if (formTick <= 0) {
+            formTick = 0.10f; multiAttackId = cs.NewId(); formSeg++;
+            float a0 = facing > 0 ? -60.0f : 240.0f, a1 = facing > 0 ? 60.0f : 120.0f;
+            if (formSeg % 2 == 0) { float t = a0; a0 = a1; a1 = t; }
+            fx.SlashArc(pos, 82.0f * rngM, a0, a1, C(140, 210, 255));
+            fx.WaterSlashWave(pos, facing, 94.0f * rngM, 34.0f, 0.75f * flair);
+            PlaySfx(SFX_SLASH, 0.34f, 1.35f);
+        }
+        Rectangle r = { pos.x - 70.0f * rngM + facing * 36, pos.y - 38, 140.0f * rngM, 76 };
+        AddHit(cs, fx, r, 11.0f * dmgM, facing * 130, -120, 0.03f, HitKind::Water, multiAttackId, -1);
+        fx.WaterTrail(pos, facing);
+        fx.WaterWake(pos, facing, 0.45f * flair);
+        if (formSeg >= (maxed ? 7 : 5)) { state = PState::Normal; vel.x = facing * 140.0f; }
+        break;
+    }
+    // 4 — Striking Tide: rapid consecutive strikes rooted in place
+    case WF_STRIKING_TIDE: {
+        vel.x *= 1.0f - Clampf(10.0f * dt, 0, 1);
+        int strikes = maxed ? 4 : 3;
+        formTick -= dt;
+        if (formTick <= 0 && formSeg < strikes) {
+            formTick = 0.12f / spdM; formSeg++;
+            bool last = (formSeg == strikes);
+            vel.x = facing * (last ? 420.0f : 230.0f) * spdM;
+            float range = (last ? 122.0f : 96.0f) * rngM;
+            Rectangle r = { facing > 0 ? pos.x : pos.x - range, pos.y - 44, range, 88 };
+            AddHit(cs, fx, r, (last ? 28.0f : 14.0f) * dmgM, facing * (last ? 540 : 180),
+                   last ? -280 : -90, 0.06f, HitKind::Water, cs.NewId(), -1);
+            float a0 = facing > 0 ? -75.0f : 255.0f, a1 = facing > 0 ? 75.0f : 105.0f;
+            fx.SlashArc(pos, range * 0.9f, a0, a1, last ? C(90, 180, 255) : C(150, 215, 255));
+            fx.WaterSlashWave({ pos.x + facing * 8.0f, pos.y + 4.0f }, facing, range * 1.1f,
+                              last ? 58.0f : 38.0f, last ? 1.05f * flair : 0.7f * flair);
+            fx.WaterWake(pos, facing, last ? 1.05f * flair : 0.55f * flair);
+            if (last) { fx.WaterBurst({ pos.x + facing * 52.0f, pos.y }); fx.AddShake(0.25f);
+                        fx.AddHitstop(0.05f); }
+            PlaySfx(SFX_WATER, last ? 0.8f : 0.4f, last ? 0.9f : 1.35f);
+        }
+        if (formSeg >= strikes && formTick <= 0) { state = PState::Normal; }
+        break;
+    }
+    // 5 — Blessed Rain After the Drought: one merciful, decisive cut that heals
+    case WF_BLESSED_RAIN: {
+        vel.x *= 1.0f - Clampf(8.0f * dt, 0, 1);
+        if (stateTimer < 0.2f && GetRandomValue(0, 1) == 0) {
+            fx.WaterTrail({ pos.x + frnd(-34, 34), pos.y - 44 }, facing);   // falling rain
+            if (fmodf(stateTimer, 0.055f) < dt)
+                fx.WaterColumn({ pos.x + frnd(-58, 58), pos.y + 18.0f }, 135.0f, 22.0f, 0.35f * flair);
+        }
+        if (!didHitFrame && stateTimer >= 0.2f) {
+            didHitFrame = true;
+            float range = 122.0f * rngM;
+            Rectangle r = { facing > 0 ? pos.x : pos.x - range, pos.y - 52, range, 104 };
+            AddHit(cs, fx, r, 55.0f * dmgM, facing * 360, -220, 0.08f, HitKind::Water, cs.NewId(), -1);
+            float a0 = facing > 0 ? -90.0f : 270.0f, a1 = facing > 0 ? 90.0f : 90.0f;
+            fx.SlashArc(pos, range, a0, a1, C(205, 238, 255));
+            fx.WaterColumn({ pos.x + facing * 50.0f, pos.y + 24.0f }, 160.0f * rngM, 52.0f * rngM, flair);
+            fx.WaterSlashWave({ pos.x + facing * 8.0f, pos.y + 10.0f }, facing, range * 1.05f, 28.0f, 0.8f * flair);
+            fx.WaterBurst({ pos.x + facing * 52.0f, pos.y - 6 });
+            fx.Ring({ pos.x + facing * 52.0f, pos.y }, 10, 124.0f * rngM, 520, 6, C(190, 228, 255));
+            fx.AddShake(0.35f); fx.AddHitstop(0.07f);
+            Heal(10.0f + 4.0f * (wf.Level(f) - 1), fx);   // relief after the drought
+            PlaySfx(SFX_WATER, 0.9f, 0.82f);
+        }
+        if (stateTimer >= 0.5f) state = PState::Normal;
+        break;
+    }
+    // 6 — Whirlpool: spin in place, dragging the horde inward and shredding it
+    case WF_WHIRLPOOL: {
+        float dur = 0.72f + 0.03f * (lv - 1);
+        vel.x *= 1.0f - Clampf(6.0f * dt, 0, 1);
+        formTick -= dt;
+        if (formTick <= 0) { formTick = 0.10f; multiAttackId = cs.NewId(); }
+        float R = 96.0f * rngM;
+        // each side pulls toward the centre (negative knockback inward)
+        AddHit(cs, fx, { pos.x, pos.y - R, R, 2 * R }, 10.0f * dmgM, -240, -40, 0.05f,
+               HitKind::Water, multiAttackId, -1);
+        AddHit(cs, fx, { pos.x - R, pos.y - R, R, 2 * R }, 10.0f * dmgM, 240, -40, 0.05f,
+               HitKind::Water, multiAttackId, -1);
+        fx.WaterTrail({ pos.x + cosf(stateTimer * 22.0f) * R * 0.6f,
+                        pos.y + sinf(stateTimer * 22.0f) * 22.0f }, facing);
+        fx.WaterSpiral(pos, R, (float)facing, 0.9f * flair);
+        if (fmodf(stateTimer, 0.14f) < dt) fx.Ring(pos, 20, R * 1.25f, 300, 6, WCOL);
+        if (stateTimer >= dur) {
+            if (maxed) {
+                fx.WaterBurst(pos);
+                fx.Ring(pos, 28, R * 1.45f, 620, 9, C(205, 240, 255));
+                fx.AddShake(0.2f);
+            }
+            state = PState::Normal;
+        }
+        break;
+    }
+    // 7 — Drop Ripple Thrust: the fastest, most direct piercing lunge
+    case WF_DROP_RIPPLE: {
+        vel.x = facing * 1160.0f * spdM;
+        Rectangle r = { pos.x - 30 + facing * 20, pos.y - 26, 60, 52 };
+        AddHit(cs, fx, r, 30.0f * dmgM, facing * 260, -120, 0.05f, HitKind::Water, multiAttackId, -1);
+        fx.WaterTrail(pos, facing);
+        fx.WaterWake(pos, facing, 0.9f * flair);
+        formTick -= dt;
+        if (formTick <= 0) {
+            formTick = 0.045f;
+            fx.WaterSlashWave({ pos.x - facing * 8.0f, pos.y + 4.0f }, facing, 110.0f * rngM, 18.0f, 0.55f * flair);
+        }
+        if (stateTimer < dt) { fx.Ring(pos, 8, 62, 520, 5, C(150, 210, 255));
+                               PlaySfx(SFX_WHOOSH, 0.7f, 1.3f); }
+        if (stateTimer >= (maxed ? 0.28f : 0.20f)) { state = PState::Normal; vel.x = facing * 150.0f; }
+        break;
+    }
+    // 8 — Waterfall Basin: leap, then crash a column of water straight down
+    case WF_WATERFALL_BASIN: {
+        float rise = 0.16f;
+        if (stateTimer < rise) {
+            vel.y = -430.0f; vel.x = facing * 120.0f;
+            fx.WaterWake(pos, facing, 0.55f * flair);
+        } else {
+            vel.y = 980.0f; vel.x = facing * 70.0f;
+            fx.WaterColumn({ pos.x + facing * 22.0f, pos.y + 56.0f }, 128.0f, 38.0f, 0.38f * flair);
+        }
+        if (stateTimer >= rise) {
+            Rectangle col = { facing > 0 ? pos.x : pos.x - 72.0f * rngM, pos.y - 30, 72.0f * rngM, 112 };
+            AddHit(cs, fx, col, 18.0f * dmgM, facing * 120, 60, 0.04f, HitKind::Water, multiAttackId, -1);
+            fx.WaterTrail({ pos.x + facing * 28.0f, pos.y }, facing);
+        }
+        if (onGround && stateTimer > rise) {
+            float R = 132.0f * rngM;
+            Rectangle aoe = { pos.x - R, pos.y + h * 0.4f - 30, 2 * R, 56 };
+            AddHit(cs, fx, aoe, 34.0f * dmgM, 0, maxed ? -320 : -240, 0.06f, HitKind::Water, cs.NewId(), -1);
+            fx.Ring({ pos.x, pos.y + h * 0.4f }, 12, R, 520, 8, C(150, 205, 255));
+            fx.WaterColumn({ pos.x, pos.y + h * 0.45f }, 190.0f * rngM, 86.0f * rngM, 1.05f * flair);
+            fx.WaterBurst({ pos.x, pos.y + h * 0.3f });
+            fx.Dust({ pos.x, pos.y + h * 0.5f });
+            fx.AddShake(0.4f); fx.AddHitstop(0.06f);
+            PlaySfx(SFX_STONE, 0.55f, 1.15f); PlaySfx(SFX_WATER, 0.6f, 1.0f);
+            state = PState::Normal;
+        }
+        if (stateTimer > 1.3f) state = PState::Normal;   // safety
+        break;
+    }
+    // 9 — Splashing Water Flow, Turbulent: a defensive churn that shields the slayer
+    case WF_SPLASHING_FLOW: {
+        float dur = 0.8f + (maxed ? 0.3f : 0.0f);
+        iframes = fmaxf(iframes, 0.12f);                 // protected through the churn
+        vel.x *= 1.0f - Clampf(5.0f * dt, 0, 1);
+        formTick -= dt;
+        if (formTick <= 0) { formTick = 0.12f; multiAttackId = cs.NewId(); }
+        float R = 80.0f * rngM;
+        AddHit(cs, fx, { pos.x - R, pos.y - R, 2 * R, 2 * R }, 7.0f * dmgM, facing * 80, -30, 0.05f,
+               HitKind::Water, multiAttackId, -1);
+        fx.WaterTrail({ pos.x + cosf(stateTimer * 30.0f) * 42.0f,
+                        pos.y - 10 + sinf(stateTimer * 30.0f) * 30.0f }, facing);
+        fx.WaterSpiral(pos, R * 0.9f, (float)-facing, 0.75f * flair);
+        if (fmodf(stateTimer, 0.12f) < dt)
+            fx.Ring(pos, R * 0.45f, R * 1.2f, 260, maxed ? 7 : 4, C(170, 225, 255));
+        if (stateTimer >= dur) {
+            if (maxed) {
+                fx.Ring(pos, 22, R * 1.45f, 520, 8, C(220, 248, 255));
+                fx.WaterBurst(pos);
+            }
+            state = PState::Normal;
+        }
+        break;
+    }
+    // 10 — Constant Flux: the river flows back and forth through the enemy line
+    case WF_CONSTANT_FLUX: {
+        float passDur = 0.34f;
+        vel.x = facing * 900.0f * spdM;
+        formTick -= dt;
+        if (formTick <= 0) {
+            formTick = 0.06f; multiAttackId = cs.NewId();
+            fx.WaterSlashWave({ pos.x - facing * 12.0f, pos.y + 8.0f }, facing, 135.0f * rngM, 28.0f, 0.65f * flair);
+        }
+        Rectangle r = { pos.x - 80 + facing * 45, pos.y - 42, 160, 84 };
+        AddHit(cs, fx, r, 13.0f * dmgM, facing * 140, -150, 0.03f, HitKind::Water, multiAttackId, -1);
+        fx.WaterTrail(pos, facing);
+        fx.WaterWake(pos, facing, 0.75f * flair);
+        if (stateTimer >= passDur) {
+            int passes = 2 + (wf.Level(f) - 1) / 2;      // L1:2  L3:3  L5:4
+            formSeg++;
+            if (formSeg >= passes) {
+                if (maxed) {                             // mastery: a final surging burst
+                    Rectangle fin = { facing > 0 ? pos.x : pos.x - 150, pos.y - 60, 150, 120 };
+                    AddHit(cs, fx, fin, 40.0f * dmgM, facing * 500, -320, 0.07f,
+                           HitKind::Water, cs.NewId(), -1);
+                    fx.WaterBurst({ pos.x + facing * 50.0f, pos.y });
+                    fx.WaterSlashWave(pos, facing, 190.0f * rngM, 58.0f, 1.25f * flair);
+                    fx.Ring(pos, 12, 152, 600, 8, WCOL); fx.AddShake(0.4f); fx.AddHitstop(0.06f);
+                }
+                state = PState::Normal; vel.x = facing * 130.0f;
+            } else {
+                stateTimer = 0; facing = -facing; multiAttackId = cs.NewId();
+                iframes = fmaxf(iframes, passDur + 0.05f);
+                fx.WaterBurst(pos);
+                fx.Ring(pos, 8, 92.0f * rngM, 520, 5, C(190, 235, 255));
+                PlaySfx(SFX_WATER, 0.7f, 1.15f);
+            }
+        }
+        break;
+    }
+    // 11 — Dead Calm: total stillness; incoming attacks are nullified, then released
+    default: {   // WF_DEAD_CALM
+        float dur = 0.55f + 0.06f * (wf.Level(f) - 1);
+        vel.x *= 1.0f - Clampf(9.0f * dt, 0, 1);
+        deadCalmT = fmaxf(deadCalmT, 0.06f);             // nullify enemy hits this frame
+        iframes = fmaxf(iframes, 0.12f);
+        if (fmodf(stateTimer, 0.2f) < dt) {
+            fx.Ring(pos, 10, 92, 150, 4, C(150, 200, 235));
+            fx.Ring(pos, 36, 132.0f * rngM, 210, 3, C(215, 245, 255));
+        }
+        fx.WaterSpiral(pos, 70.0f * rngM, 0.35f, 0.35f * flair);
+        if (stateTimer >= dur) {
+            float R = 150.0f * rngM;                     // release: a calm-shattering ripple
+            AddHit(cs, fx, { pos.x - R, pos.y - 90, 2 * R, 180 }, 20.0f * dmgM, 0, -160, 0.06f,
+                   HitKind::Water, cs.NewId(), -1);
+            AddHit(cs, fx, { pos.x, pos.y - 90, R, 180 }, 0, 380, -120, 0.05f,
+                   HitKind::Water, cs.NewId(), -1);
+            AddHit(cs, fx, { pos.x - R, pos.y - 90, R, 180 }, 0, -380, -120, 0.05f,
+                   HitKind::Water, cs.NewId(), -1);
+            fx.Ring(pos, 14, R, 560, 10, C(170, 215, 245));
+            fx.WaterSlashWave({ pos.x - R * 0.15f, pos.y + 10.0f }, 1, R * 1.05f, 42.0f, flair);
+            fx.WaterSlashWave({ pos.x + R * 0.15f, pos.y + 10.0f }, -1, R * 1.05f, 42.0f, flair);
+            fx.WaterSpiral(pos, R * 0.72f, 1.0f, 1.3f * flair);
+            fx.WaterBurst(pos); fx.AddShake(0.35f); fx.AddHitstop(0.05f);
+            PlaySfx(SFX_WATER, 0.9f, 0.7f);
+            state = PState::Normal;
+        }
+        break;
+    }
+    }
+}
+
 void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
     UpdateTechs(dt, cs, fx);     // techniques outlive states, even death throes
 
@@ -179,6 +532,8 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
     }
 
     for (int i = 0; i < STYLE_COUNT; i++) cd[i] = fmaxf(cd[i] - dt, 0);
+    for (int i = 0; i < WATER_FORM_COUNT; i++) waterCd[i] = fmaxf(waterCd[i] - dt, 0);
+    deadCalmT = fmaxf(deadCalmT - dt, 0);
     iframes = fmaxf(iframes - dt, 0);
     hurtFlash = fmaxf(hurtFlash - dt, 0);
     hiddenT = fmaxf(hiddenT - dt, 0);
@@ -241,16 +596,9 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
                 }
                 break;
             }
-            if (styleP[STYLE_WATER] && cd[STYLE_WATER] <= 0) {
-                state = PState::Water;
-                stateTimer = 0;
-                waterPass = 0;
-                cd[STYLE_WATER] = cfg::WATER_CD * prog->CdMult(STYLE_WATER);
-                multiAttackId = cs.NewId();
-                waterTick = 0.07f;
-                iframes = fmaxf(iframes, WATER_TIME * prog->ReachMult(STYLE_WATER) + 0.05f);
-                fx.AddShake(0.08f);
-                PlaySfx(SFX_WATER, 0.8f);
+            if (equipped == STYLE_WATER) {
+                // Water Breathing: eleven forms, each on its own number key
+                TryStartWaterForm(cs, fx);
             }
             else if (styleP[STYLE_FIRE] && cd[STYLE_FIRE] <= 0) {
                 state = PState::FireWindup;
@@ -378,6 +726,9 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
             }
             break;
         }
+        case PState::WaterForm:
+            UpdateWaterForm(dt, cs, fx);
+            break;
         case PState::FireWindup: {
             stateTimer += dt;
             vel.x = 0;
@@ -568,7 +919,8 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
     }
 
     // physics (dashes and weaves manage their own vertical motion)
-    bool noGravity = (state == PState::Water || state == PState::Plunge ||
+    bool noGravity = (state == PState::Water || state == PState::WaterForm ||
+                      state == PState::Plunge ||
                       state == PState::Serpent || state == PState::Mist);
     if (!noGravity) vel.y += cfg::GRAVITY * dt;
     if (state == PState::Love) vel.y = fminf(vel.y, 260.0f);
@@ -759,6 +1111,20 @@ void Player::Draw() const {
         }
         case PState::Plunge:     ang = 90.0f + facing * 8.0f; break;
         case PState::Water:      ang = 0; break;
+        case PState::WaterForm:
+            switch (waterForm) {
+                case WF_WATER_WHEEL:
+                case WF_WHIRLPOOL:
+                case WF_SPLASHING_FLOW:
+                    ang = fmodf(gt * 1500.0f, 360.0f); spinBlade = true; break;
+                case WF_WATERFALL_BASIN: ang = 78.0f; break;
+                case WF_DROP_RIPPLE:
+                case WF_CONSTANT_FLUX:   ang = 0; break;
+                case WF_DEAD_CALM:       ang = 6.0f; break;
+                case WF_BLESSED_RAIN:    ang = stateTimer < 0.2f ? -84.0f : 44.0f; break;
+                default:                 ang = -28.0f + sinf(gt * 40.0f) * 22.0f; break;
+            }
+            break;
         case PState::Love:       ang = fmodf(gt * 1300.0f, 360.0f); spinBlade = true; break;
         case PState::Serpent:    ang = 8.0f + sinf(gt * 46.0f) * 55.0f; break;
         case PState::Wind:
@@ -783,7 +1149,7 @@ void Player::Draw() const {
     // blade
     Rectangle blade = { hand.x, hand.y, 46, 4.5f };
     Color bladeCol = C(210, 220, 235);
-    if (state == PState::Water) bladeCol = C(120, 200, 255);
+    if (state == PState::Water || state == PState::WaterForm) bladeCol = C(120, 200, 255);
     if (state == PState::FireWindup || state == PState::FireRecover) bladeCol = C(255, 170, 90);
     if (state == PState::Stone) bladeCol = C(190, 182, 170);
     if (state == PState::Love)  bladeCol = C(255, 150, 205);
@@ -792,6 +1158,49 @@ void Player::Draw() const {
     DrawRectanglePro(blade, { 0, 2.25f }, ang, Fade(bladeCol, alpha));
     Rectangle hilt = { hand.x, hand.y, 8, 7 };
     DrawRectanglePro(hilt, { 4, 3.5f }, ang, Fade(C(120, 40, 40), alpha));
+
+    if (state == PState::WaterForm) {
+        float pulse = 0.5f + 0.5f * sinf(gt * 14.0f);
+        Color aura = C(120, 205, 255);
+        switch (waterForm) {
+            case WF_WATER_WHEEL:
+            case WF_WHIRLPOOL:
+            case WF_SPLASHING_FLOW:
+                DrawRing(pos, 44.0f + pulse * 12.0f, 50.0f + pulse * 12.0f,
+                         0, 360, 40, Fade(aura, 0.28f * alpha));
+                DrawRing(pos, 72.0f, 77.0f, gt * 220.0f, gt * 220.0f + 250.0f,
+                         32, Fade(C(210, 245, 255), 0.24f * alpha));
+                break;
+            case WF_WATERFALL_BASIN:
+                DrawRectangle((int)(pos.x - 24), (int)(pos.y - 118), 48, 144,
+                              Fade(aura, 0.12f * alpha));
+                DrawLineEx({ pos.x - 20.0f, pos.y - 108.0f }, { pos.x - 20.0f, pos.y + 26.0f },
+                           3.0f, Fade(C(230, 250, 255), 0.35f * alpha));
+                DrawLineEx({ pos.x + 18.0f, pos.y - 108.0f }, { pos.x + 18.0f, pos.y + 26.0f },
+                           3.0f, Fade(C(230, 250, 255), 0.28f * alpha));
+                break;
+            case WF_DROP_RIPPLE:
+            case WF_CONSTANT_FLUX:
+                DrawLineEx({ pos.x - facing * 78.0f, pos.y + 8.0f },
+                           { pos.x + facing * 118.0f, pos.y + 8.0f },
+                           8.0f, Fade(aura, 0.18f * alpha));
+                DrawLineEx({ pos.x - facing * 52.0f, pos.y - 8.0f },
+                           { pos.x + facing * 88.0f, pos.y - 8.0f },
+                           4.0f, Fade(C(230, 250, 255), 0.24f * alpha));
+                break;
+            case WF_DEAD_CALM:
+                DrawRing(pos, 52.0f, 55.0f, 0, 360, 48, Fade(C(220, 248, 255), 0.34f * alpha));
+                DrawRing(pos, 104.0f, 107.0f, 0, 360, 64, Fade(aura, 0.18f * alpha));
+                break;
+            default: {
+                float s0 = facing > 0 ? -72.0f : 108.0f;
+                float s1 = facing > 0 ? 72.0f : 252.0f;
+                DrawCircleSector({ pos.x + facing * 10.0f, pos.y + 4.0f },
+                                 94.0f, s0, s1, 28, Fade(aura, 0.16f * alpha));
+                break;
+            }
+        }
+    }
 
     // slash flash while a combo hit is active
     if (state == PState::Attack && didHitFrame) {
