@@ -17,7 +17,7 @@ struct StyleInfo { const char* name; const char* shortName; const char* key; Col
 // 1, because only the equipped style ever responds to input.
 static const StyleInfo STYLE_INFO[STYLE_COUNT] = {
     { "WATER",   "WTR", "1", { 80, 160, 255, 255 } },
-    { "FIRE",    "FIR", "1", { 255, 130, 50, 255 } },
+    { "FLAME",   "FLM", "1-9", { 255, 130, 50, 255 } },
     { "STONE",   "STN", "1", { 185, 175, 160, 255 } },
     { "LOVE",    "LOV", "1", { 255, 130, 195, 255 } },
     { "SERPENT", "SRP", "1", { 120, 220, 90, 255 } },
@@ -31,7 +31,7 @@ static const float STYLE_CD_BASE[STYLE_COUNT] = {
 // one-line blurbs for the Breathing Style selection menu
 static const char* STYLE_DESC[STYLE_COUNT] = {
     "eleven forms - each its own ability, leveled independently",
-    "explosive forward burst of flame",
+    "nine forms - burst, guard, pursuit, and Rengoku finish",
     "guard-crushing ground slam",
     "healing dance of blades",
     "venomous weaving flurry",
@@ -40,7 +40,7 @@ static const char* STYLE_DESC[STYLE_COUNT] = {
 };
 static const char* MASTERY_DESC[STYLE_COUNT] = {
     "CONSTANT FLUX - the dash flows back through the enemy line a second time",
-    "RENGOKU - wider blast that leaves burning ground behind",
+    "FLAME MASTERY - level individual forms to make fire larger and brighter",
     "EARTH SPLITTER - the slam launches a quake racing along the ground",
     "FIVE-STEP DANCE - five dashes, and every cut mends you twice as much",
     "TWIN FANGS - the weave ends in a venomous finishing bite",
@@ -70,6 +70,21 @@ static const WaterFormInfo WATER_FORMS[WATER_FORM_COUNT] = {
     { "Splashing Water Flow, Turbulent",  "a defensive churn; weather blows unharmed" },
     { "Constant Flux",                    "the river flows back and forth through the line" },
     { "Dead Calm",                        "total stillness; nullify incoming attacks, then release" },
+};
+
+static const char* FLAME_FORM_KEYLABEL[FLAME_FORM_COUNT] =
+    { "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+struct FlameFormInfo { const char* name; const char* role; };
+static const FlameFormInfo FLAME_FORMS[FLAME_FORM_COUNT] = {
+    { "Unknowing Fire",                 "instant dash slash - quick engage and single-target burst" },
+    { "Rising Scorching Sun",           "rising arc launcher - anti-air and juggle setup" },
+    { "Blazing Universe",               "heavy overhead flame - slow punish with high impact" },
+    { "Blooming Flame Undulation",      "defensive fire wheel - burns away Akaza, Kokushibo, and Muzan attacks" },
+    { "Flame Tiger",                    "pouncing multi-hit pressure - pins elites and clears packs" },
+    { "Solar Heat Haze",                "original feint - phase through and backstrike the nearest target" },
+    { "Inferno Wheel",                  "original rolling circle - mobile crowd control" },
+    { "Crimson Lotus Crest",            "original ranged crest - sends fire forward and leaves burning ground" },
+    { "Rengoku",                        "ultimate charge - cinematic, destructive finishing burst" },
 };
 
 void Game::Init() {
@@ -121,10 +136,16 @@ void Game::DebugStart(int jump) {
 }
 
 void Game::UnlockAllForTesting() {
-    // --unlock-all developer flag: every Breathing Style becomes selectable
-    // in the menu, and the equipped style's upgrade tree is maxed each run.
+    // --unlock-all developer flag: every Breathing Style, player form,
+    // generic tree, and Hashira mastery is maxed for testing.
     devUnlockAll = true;
     unlocks.UnlockAll();
+    giyu.mastery.xp = 999;
+    shinobu.mastery.xp = 999;
+    rengoku.mastery.xp = 999;
+    gyomei.mastery.xp = 999;
+    tengen.mastery.xp = 999;
+    sanemi.mastery.xp = 999;
 }
 
 int Game::HashiraLimit() const {
@@ -465,7 +486,7 @@ void Game::BeginSunriseFinale() {
 
 void Game::StartRun() {
     prog.Reset();
-    if (devUnlockAll) prog.UnlockAll();   // --unlock-all: max the equipped style's tree
+    if (devUnlockAll) prog.UnlockAll();   // --unlock-all: max every style and form
     player.prog = &prog;
     player.Reset({ cfg::SCREEN_W * 0.5f, cfg::GROUND_Y - 60 });
     // equip the chosen Breathing Style for the whole run (fall back if it is locked)
@@ -605,9 +626,36 @@ void Game::ResolveCombat() {
             }
         }
     }
+    // Fourth Form: Blooming Flame Undulation - a rotating flame guard that
+    // consumes Demon Art hitboxes and special projectiles before impact.
+    if (player.FlameGuardActive()) {
+        Rectangle z = player.FlameGuardZone();
+        int burned = 0;
+        for (auto& hb : combat.Boxes()) {
+            if (hb.team == Team::Enemy && hb.life > 0 &&
+                CheckCollisionRecs(hb.rect, z)) {
+                hb.life = 0;
+                burned++;
+                fx.Sparks({ hb.rect.x + hb.rect.width * 0.5f,
+                            hb.rect.y + hb.rect.height * 0.5f },
+                          -90, 180, 7, C(255, 220, 120), 310, 3.0f);
+            }
+        }
+        burned += boss.NullifyCrescentsInRect(z);
+        burned += boss.NullifyRingsInRect(z) * 3;
+        burned += akaza.NullifyOrbsInRect(z);
+        burned += douma.NullifyShardsInRect(z);
+        burned += kokushibo.NullifyShardsInRect(z);
+        if (burned > 0) {
+            fx.Ring({ z.x + z.width * 0.5f, z.y + z.height * 0.5f },
+                    18, 118, 520, 7, C(255, 150, 55));
+            fx.AddShake(0.08f);
+            PlaySfx(SFX_FIRE, 0.36f, 1.35f);
+        }
+    }
 
     for (auto& hb : combat.Boxes()) {
-        if (hb.life <= 0) continue;      // nullified (Dead Calm) or expired
+        if (hb.life <= 0) continue;      // nullified by a guard or expired
         if (hb.team == Team::Player) {
             for (auto& e : enemies) {
                 if (!e.alive || e.hitMem.Seen(hb.attackId)) continue;
@@ -797,7 +845,16 @@ void Game::UpdatePlaying(float dt) {
     }
     if (boss.Alive()) {
         float d = fabsf(boss.pos.x - player.pos.x);
-        if (d < best) { player.huntX = boss.pos.x; player.hasHunt = true; }
+        if (d < best) { best = d; player.huntX = boss.pos.x; player.hasHunt = true; }
+    }
+    if (akaza.Alive()) {
+        float d = fabsf(akaza.pos.x - player.pos.x);
+        if (d < best) { best = d; player.huntX = akaza.pos.x; player.hasHunt = true; }
+    }
+    UpperMoon* huntMoon = ActiveMoon();
+    if (huntMoon && huntMoon->Alive()) {
+        float d = fabsf(huntMoon->pos.x - player.pos.x);
+        if (d < best) { player.huntX = huntMoon->pos.x; player.hasHunt = true; }
     }
 
     player.Update(dt, combat, fx);
@@ -1093,7 +1150,14 @@ void Game::CycleEquippedStyle(int dir) {
     }
     player.equipped = s;
     selectedStyle = s;        // remembered for the next run too
-    player.cd[s] = 0;         // ready to use immediately
+    for (int i = 0; i < STYLE_COUNT; i++) player.cd[i] = 0;
+    for (int i = 0; i < WATER_FORM_COUNT; i++) player.waterCd[i] = 0;
+    for (int i = 0; i < FLAME_FORM_COUNT; i++) player.flameCd[i] = 0;
+    if (devUnlockAll) prog.UnlockAll();
+    selRow = (s == STYLE_WATER || s == STYLE_FIRE) ? 0 : s;
+    selCol = 0;
+    fx.Text({ player.pos.x, player.pos.y - 104 }, STYLE_INFO[s].col, 0.95f,
+            "%s BREATHING", STYLE_INFO[s].name);
     PlaySfx(SFX_UPGRADE, 0.7f);
 }
 
@@ -1134,6 +1198,16 @@ void Game::UpdateUpgradeMenu() {
         state = GState::Playing;
         return;
     }
+    if (devUnlockAll) {
+        if (IsKeyPressed(KEY_Q) || IsKeyPressed(KEY_LEFT_BRACKET)) {
+            CycleEquippedStyle(-1);
+            return;
+        }
+        if (IsKeyPressed(KEY_E) || IsKeyPressed(KEY_RIGHT_BRACKET)) {
+            CycleEquippedStyle(+1);
+            return;
+        }
+    }
     // Water Breathing levels its eleven forms independently (one row per form)
     if (player.equipped == STYLE_WATER) {
         if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S))
@@ -1145,6 +1219,23 @@ void Game::UpdateUpgradeMenu() {
             if (prog.water.CanUpgrade(f, prog.points)) {
                 prog.points -= prog.water.Cost(f);
                 prog.water.level[f]++;
+                PlaySfx(SFX_UPGRADE, 0.9f);
+            } else {
+                PlaySfx(SFX_PICKUP, 0.35f, 0.5f);
+            }
+        }
+        return;
+    }
+    if (player.equipped == STYLE_FIRE) {
+        if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S))
+            selRow = (selRow + 1) % FLAME_FORM_COUNT;
+        if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W))
+            selRow = (selRow + FLAME_FORM_COUNT - 1) % FLAME_FORM_COUNT;
+        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_J)) {
+            int f = selRow % FLAME_FORM_COUNT;
+            if (prog.flame.CanUpgrade(f, prog.points)) {
+                prog.points -= prog.flame.Cost(f);
+                prog.flame.level[f]++;
                 PlaySfx(SFX_UPGRADE, 0.9f);
             } else {
                 PlaySfx(SFX_PICKUP, 0.35f, 0.5f);
@@ -1197,7 +1288,9 @@ void Game::Update(float rawDt) {
                 return;
             }
             if (IsKeyPressed(KEY_TAB)) {
-                selRow = player.equipped;   // upgrades apply to the equipped style
+                selRow = (player.equipped == STYLE_WATER || player.equipped == STYLE_FIRE)
+                         ? 0 : player.equipped;
+                if (devUnlockAll) prog.UnlockAll();
                 state = GState::Upgrade;
                 return;
             }
@@ -1466,6 +1559,14 @@ void Game::DrawUI() const {
                          prog.water.Level(i), wc, prog.water.Maxed(i));
         }
         DrawText("WATER BREATHING - 11 FORMS", 20, 104, 14, Fade(wc, 0.9f));
+    } else if (player.equipped == STYLE_FIRE) {
+        Color fc = STYLE_INFO[STYLE_FIRE].col;
+        for (int i = 0; i < FLAME_FORM_COUNT; i++) {
+            float cdMax = FlameFormBaseCd(i) * prog.flame.CdMult(i);
+            DrawFormIcon(20 + i * 44, 56, FLAME_FORM_KEYLABEL[i], player.flameCd[i], cdMax,
+                         prog.flame.Level(i), fc, prog.flame.Maxed(i));
+        }
+        DrawText("FLAME BREATHING - 9 FORMS", 20, 104, 14, Fade(fc, 0.9f));
     } else {
         int es = player.equipped;
         const StyleUpgrades& u = prog.up[es];
@@ -1889,7 +1990,7 @@ void Game::DrawSettings() const {
         { "Crouch",            "SHIFT" },
         { "Attack combo",      "J" },
         { "Launcher / Plunge", "UP+J / DOWN+J" },
-        { "Breathing Style",   "1" },
+        { "Style / Forms",     "1-9 / 0 / -" },
         { "Summon Hashira",    "G / B / R / Y / T / N" },
         { "Upgrades",          "TAB" },
         { "Pause menu",        "ESC / P" },
@@ -1903,7 +2004,7 @@ void Game::DrawSettings() const {
     }
 
     ky += 12;
-    DrawText("Whichever Breathing Style you equip fires on 1 -", kx, ky, 15,
+    DrawText("Water and Flame use numbered forms; other styles fire on 1 -", kx, ky, 15,
              C(160, 156, 172));
     DrawText("you only ever carry one into a run.", kx, ky + 20, 15, C(160, 156, 172));
 
@@ -1920,7 +2021,9 @@ void Game::DrawUpgradeMenu() const {
         CText("WATER  BREATHING  -  FORM  MASTERY", 34, 34, C(235, 225, 235));
         DrawText(TextFormat("POINTS  %d", prog.points), cfg::SCREEN_W - 230, 36, 28,
                  C(255, 215, 120));
-        CText("UP / DOWN - choose form      ENTER - level up      TAB - return to battle",
+        CText(devUnlockAll
+              ? "UP / DOWN - choose form      Q / E - swap dev shop style      TAB - return"
+              : "UP / DOWN - choose form      ENTER - level up      TAB - return to battle",
               78, 15, C(170, 165, 185));
 
         const int y0 = 112, rh = 42;
@@ -1956,9 +2059,55 @@ void Game::DrawUpgradeMenu() const {
         return;
     }
 
+    if (player.equipped == STYLE_FIRE) {
+        Color fc = STYLE_INFO[STYLE_FIRE].col;
+        int cur = selRow % FLAME_FORM_COUNT;
+        CText("FLAME  BREATHING  -  FORM  MASTERY", 34, 34, C(235, 225, 235));
+        DrawText(TextFormat("POINTS  %d", prog.points), cfg::SCREEN_W - 230, 36, 28,
+                 C(255, 215, 120));
+        CText(devUnlockAll
+              ? "UP / DOWN - choose form      Q / E - swap dev shop style      TAB - return"
+              : "UP / DOWN - choose form      ENTER - level up      TAB - return to battle",
+              78, 15, C(170, 165, 185));
+
+        const int y0 = 122, rh = 50;
+        for (int i = 0; i < FLAME_FORM_COUNT; i++) {
+            int y = y0 + i * rh;
+            bool sel = (cur == i);
+            int lv = prog.flame.Level(i);
+            bool mx = prog.flame.Maxed(i);
+            Rectangle row = { 40, (float)y, (float)(cfg::SCREEN_W - 80), (float)(rh - 8) };
+            DrawRectangleRounded(row, 0.14f, 4, sel ? C(50, 36, 34) : C(30, 22, 24));
+            if (sel) DrawRectangleLinesEx(row, 2, C(255, 215, 120));
+
+            DrawText(TextFormat("%2d", i + 1), 56, y + 9, 22, Fade(fc, 0.95f));
+            DrawText(FLAME_FORMS[i].name, 100, y + 11, 20, mx ? C(255, 225, 150) : C(228, 223, 235));
+            DrawText(TextFormat("KEY %s", FLAME_FORM_KEYLABEL[i]), 610, y + 14, 14,
+                     C(150, 150, 165));
+            for (int p = 0; p < 5; p++)
+                DrawRectangle(752 + p * 22, y + 13, 17, 15,
+                              p < lv ? (mx ? C(255, 215, 120) : fc) : C(52, 42, 42));
+            if (mx)
+                DrawText("MAX", cfg::SCREEN_W - 118, y + 11, 18, C(255, 215, 120));
+            else {
+                bool afford = prog.points >= prog.flame.Cost(i);
+                DrawText(TextFormat("%d pt", prog.flame.Cost(i)), cfg::SCREEN_W - 118, y + 13, 16,
+                         afford ? C(210, 205, 225) : C(120, 115, 135));
+            }
+        }
+
+        int fy = y0 + FLAME_FORM_COUNT * rh + 8;
+        CText(FLAME_FORMS[cur].role, fy, 17, C(216, 211, 226));
+        CText(TextFormat("LEVEL  %d / 5   -   flames grow larger, brighter, faster & more destructive",
+              prog.flame.Level(cur)), fy + 24, 14, Fade(fc, 0.9f));
+        return;
+    }
+
     CText("BREATHING  MASTERY", 40, 40, C(235, 225, 235));
     DrawText(TextFormat("POINTS  %d", prog.points), cfg::SCREEN_W - 230, 42, 28, C(255, 215, 120));
-    CText("LEFT / RIGHT - choose upgrade      ENTER - purchase      TAB - return to battle",
+    CText(devUnlockAll
+          ? "LEFT / RIGHT - choose upgrade      Q / E - swap dev shop style      TAB - return"
+          : "LEFT / RIGHT - choose upgrade      ENTER - purchase      TAB - return to battle",
           92, 16, C(170, 165, 185));
 
     // only the equipped style is upgradable — the menu shows it alone
@@ -2062,10 +2211,10 @@ void Game::DrawOverlays() const {
         CText("Survive the waves. Grow stronger. Hold Muzan until sunrise.", 234, 18, C(200, 195, 210));
 
         CText("A / D - move    W / SPACE - jump    SHIFT - crouch    J - combo    UP+J launcher    DOWN+J plunge", 300, 15, C(210, 220, 235));
-        CText("WATER - flowing multi-hit dash        FIRE - explosive burst", 342, 15, C(120, 190, 255));
+        CText("WATER - eleven flowing forms         FLAME - nine cinematic forms", 342, 15, C(120, 190, 255));
         CText("STONE - guard-crushing slam           LOVE - healing dance", 368, 15, C(255, 150, 205));
         CText("SERPENT - venomous weaving flurry     WIND - sweeping tornadoes", 394, 15, C(140, 220, 120));
-        CText("MIST - vanish, blink, ambush from the fog   (your one style fires on 1)", 420, 15, C(185, 195, 215));
+        CText("MIST - vanish, blink, ambush from the fog   (Water/Flame use numbered forms)", 420, 15, C(185, 195, 215));
         CText("G - summon GIYU TOMIOKA, the Water Hashira. if he falls, he is gone for the run", 446, 15, C(120, 190, 255));
         CText("B - summon SHINOBU KOCHO, the Insect Hashira. poison, triage, and wisteria", 472, 15, C(190, 150, 255));
         CText("R - summon KYOJURO RENGOKU, the Flame Hashira. burst damage and openings", 498, 15, C(255, 150, 55));

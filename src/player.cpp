@@ -29,13 +29,50 @@ static const float SERP_TIME    = 0.85f;   // serpent weave duration
 static const float WIND_WINDUP  = 0.35f;   // wind gathering before the sweep
 static const float MIST_BLINK   = 0.16f;   // mist blink dash
 
+static Color FlameCol(int lv) {
+    return lv >= 5 ? C(255, 236, 145) : (lv >= 3 ? C(255, 170, 55) : C(255, 115, 45));
+}
+
+static Color FlameCore(int lv) {
+    return lv >= 4 ? C(255, 250, 205) : C(255, 215, 120);
+}
+
+static void FlameWake(Effects& fx, Vector2 p, int facing, float scale, int lv) {
+    Color flame = FlameCol(lv);
+    Color core = FlameCore(lv);
+    int n = (int)(4 * scale + lv);
+    for (int i = 0; i < n; i++) {
+        fx.Ember({ p.x - facing * frnd(2, 46) * scale, p.y + frnd(-34, 18) * scale });
+    }
+    fx.Sparks(p, facing > 0 ? 180.0f : 0.0f, 52, 2 + lv / 2, core, 360 * scale, 2.5f * scale);
+    if (GetRandomValue(0, 2) == 0)
+        fx.SlashArc({ p.x + facing * 8.0f, p.y - 4.0f }, 42.0f * scale,
+                    facing > 0 ? -42.0f : 222.0f,
+                    facing > 0 ? 42.0f : 138.0f, flame);
+}
+
+static void FlameBurstLine(Effects& fx, Vector2 p, int facing, float len, float scale, int lv) {
+    Color flame = FlameCol(lv);
+    Color core = FlameCore(lv);
+    int n = (int)(10 * scale + lv * 2);
+    for (int i = 0; i < n; i++) {
+        float t = (i + frnd(-0.2f, 0.2f)) / fmaxf((float)(n - 1), 1.0f);
+        Vector2 q = { p.x + facing * len * Clampf(t, 0, 1),
+                      p.y + frnd(-34, 20) * scale - sinf(t * PI) * 28.0f * scale };
+        fx.Sparks(q, facing > 0 ? 0.0f : 180.0f, 70, 1, (i % 3 == 0) ? core : flame,
+                  310.0f * scale, 2.8f * scale);
+        if (i % 2 == 0) fx.Ember(q);
+    }
+}
+
 void Player::Reset(Vector2 spawn) {
     pos = spawn; vel = {0, 0};
     facing = 1;
     maxHp = cfg::P_MAX_HP; hp = maxHp;
     for (int i = 0; i < STYLE_COUNT; i++) cd[i] = 0;
     for (int i = 0; i < WATER_FORM_COUNT; i++) waterCd[i] = 0;
-    waterForm = -1; formSeg = 0; formTick = 0; deadCalmT = 0;
+    for (int i = 0; i < FLAME_FORM_COUNT; i++) flameCd[i] = 0;
+    waterForm = -1; flameForm = -1; formSeg = 0; formTick = 0; deadCalmT = 0; flameGuardT = 0;
     iframes = 0;
     hitMem.Clear();
     state = PState::Normal;
@@ -520,6 +557,324 @@ void Player::UpdateWaterForm(float dt, CombatSystem& cs, Effects& fx) {
     }
 }
 
+// --- Flame Breathing: nine forms --------------------------------------------
+bool Player::TryStartFlameForm(CombatSystem& cs, Effects& fx) {
+    static const int FKEY[FLAME_FORM_COUNT] = {
+        KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR, KEY_FIVE,
+        KEY_SIX, KEY_SEVEN, KEY_EIGHT, KEY_NINE
+    };
+    static const char* FORM_CALL[FLAME_FORM_COUNT] = {
+        "UNKNOWING FIRE", "RISING SCORCHING SUN", "BLAZING UNIVERSE",
+        "BLOOMING FLAME UNDULATION", "FLAME TIGER", "SOLAR HEAT HAZE",
+        "INFERNO WHEEL", "CRIMSON LOTUS CREST", "NINTH FORM: RENGOKU"
+    };
+    int f = -1;
+    for (int i = 0; i < FLAME_FORM_COUNT; i++)
+        if (IsKeyPressed(FKEY[i])) { f = i; break; }
+    if (f < 0) return false;
+    if (flameCd[f] > 0) { PlaySfx(SFX_PICKUP, 0.22f, 0.55f); return false; }
+
+    flameForm = f;
+    state = PState::FlameForm;
+    stateTimer = 0; didHitFrame = false; formSeg = 0; formTick = 0;
+    multiAttackId = cs.NewId();
+    flameCd[f] = FlameFormBaseCd(f) * (prog ? prog->flame.CdMult(f) : 1.0f);
+    int lv = prog ? prog->flame.Level(f) : 1;
+    float flair = 0.9f + 0.13f * (lv - 1);
+    if (hasHunt && (f == FF_UNKNOWING_FIRE || f == FF_FLAME_TIGER ||
+                    f == FF_SOLAR_HEAT_HAZE || f == FF_RENGOKU))
+        facing = huntX > pos.x ? 1 : -1;
+
+    switch (f) {
+        case FF_UNKNOWING_FIRE:
+        case FF_SOLAR_HEAT_HAZE:
+            iframes = fmaxf(iframes, 0.22f + 0.03f * lv);
+            break;
+        case FF_BLOOMING_UNDULATION:
+            flameGuardT = 0.78f + 0.09f * lv;
+            iframes = fmaxf(iframes, flameGuardT);
+            break;
+        case FF_RENGOKU:
+            iframes = fmaxf(iframes, 0.62f + 0.04f * lv);
+            fx.Flash(C(255, 120, 45), 0.18f + lv * 0.025f);
+            break;
+        default:
+            iframes = fmaxf(iframes, 0.12f + 0.02f * lv);
+            break;
+    }
+
+    fx.Text({ pos.x, pos.y - h - 18 }, FlameCol(lv), 0.92f, "%s", FORM_CALL[f]);
+    FlameWake(fx, pos, facing, flair, lv);
+    if (lv >= 4) fx.Ring(pos, 12, 92.0f * flair, 520, 6, FlameCol(lv));
+    PlaySfx(SFX_FIRE, f == FF_RENGOKU ? 1.0f : 0.65f, 1.18f - 0.035f * f);
+    return true;
+}
+
+void Player::UpdateFlameForm(float dt, CombatSystem& cs, Effects& fx) {
+    stateTimer += dt;
+    if (!prog) { state = PState::Normal; return; }
+    FlameForms& ff = prog->flame;
+    const int f = flameForm;
+    const int lv = ff.Level(f);
+    const bool maxed = ff.Maxed(f);
+    const float dmgM = ff.DmgMult(f);
+    const float rngM = ff.RangeMult(f);
+    const float spdM = ff.SpeedMult(f);
+    const float flair = 0.9f + 0.13f * (lv - 1);
+    const Color FC = FlameCol(lv);
+    const Color CORE = FlameCore(lv);
+    vel.y = 0;
+
+    switch (f) {
+    // 1 - Unknowing Fire: explosive straight-line draw slash
+    case FF_UNKNOWING_FIRE: {
+        float dur = (maxed ? 0.34f : 0.27f) / spdM;
+        vel.x = facing * 1120.0f * spdM;
+        FlameWake(fx, pos, facing, 0.8f * flair, lv);
+        Rectangle r = { pos.x - 70.0f + facing * 48.0f, pos.y - 42,
+                        140.0f * rngM, 84 };
+        AddHit(cs, fx, r, 22.0f * dmgM, facing * 360, -160, 0.035f,
+               HitKind::Fire, multiAttackId, -1);
+        if (!didHitFrame && stateTimer > 0.07f) {
+            didHitFrame = true;
+            fx.SlashArc(pos, 92.0f * rngM, facing > 0 ? -65.0f : 245.0f,
+                        facing > 0 ? 65.0f : 115.0f, CORE);
+            FlameBurstLine(fx, { pos.x - facing * 38.0f, pos.y + 4 }, facing,
+                           170.0f * rngM, flair, lv);
+            PlaySfx(SFX_WHOOSH, 0.75f, 1.35f);
+        }
+        if (stateTimer >= dur) { state = PState::Normal; vel.x = facing * 150.0f; }
+        break;
+    }
+    // 2 - Rising Scorching Sun: vertical launcher and anti-air
+    case FF_RISING_SUN: {
+        vel.x *= 1.0f - Clampf(9.0f * dt, 0, 1);
+        if (stateTimer < 0.18f) {
+            vel.y = -360.0f * spdM;
+            FlameWake(fx, { pos.x + facing * 18.0f, pos.y }, facing, 0.55f * flair, lv);
+        }
+        if (!didHitFrame && stateTimer >= 0.08f) {
+            didHitFrame = true;
+            float wdt = 126.0f * rngM;
+            Rectangle r = { pos.x - wdt * 0.5f, pos.y - 118.0f * rngM, wdt, 156.0f * rngM };
+            AddHit(cs, fx, r, 30.0f * dmgM, facing * 150, -520, 0.07f,
+                   HitKind::Fire, cs.NewId(), -1);
+            fx.SlashArc({ pos.x + facing * 8.0f, pos.y - 8.0f }, 98.0f * rngM,
+                        facing > 0 ? 135.0f : 45.0f,
+                        facing > 0 ? -35.0f : 215.0f, FC);
+            fx.Ring({ pos.x + facing * 18.0f, pos.y - 42.0f }, 10, 102.0f * rngM, 560, 7, CORE);
+            fx.AddHitstop(0.04f); PlaySfx(SFX_FIRE, 0.75f, 1.25f);
+        }
+        if (stateTimer >= 0.42f) state = PState::Normal;
+        break;
+    }
+    // 3 - Blazing Universe: heavy overhead sunfall, strong boss punish
+    case FF_BLAZING_UNIVERSE: {
+        vel.x *= 1.0f - Clampf(8.0f * dt, 0, 1);
+        if (stateTimer < 0.28f) {
+            fx.FireCharge({ pos.x + facing * 30.0f, pos.y - 44.0f });
+            if (fmodf(stateTimer, 0.08f) < dt) fx.Ring(pos, 16, 90.0f * flair, 480, 5, FC);
+        } else if (!didHitFrame) {
+            didHitFrame = true;
+            float reach = 164.0f * rngM;
+            Rectangle r = { facing > 0 ? pos.x - 8.0f : pos.x - reach + 8.0f,
+                            pos.y - 92.0f, reach, 154.0f };
+            AddHit(cs, fx, r, 58.0f * dmgM, facing * 520, -360, 0.08f,
+                   HitKind::Fire, cs.NewId(), -1);
+            Vector2 c = { pos.x + facing * reach * 0.55f, pos.y - 12.0f };
+            fx.SlashArc(c, 122.0f * rngM, facing > 0 ? -140.0f : 320.0f,
+                        facing > 0 ? 78.0f : 102.0f, FC);
+            fx.FireExplosion(c);
+            fx.AddShake(0.45f); fx.AddHitstop(0.08f);
+            PlaySfx(SFX_EXPLO, 0.82f, 1.05f);
+        }
+        if (stateTimer >= 0.68f) state = PState::Normal;
+        break;
+    }
+    // 4 - Blooming Flame Undulation: defensive circular guard
+    case FF_BLOOMING_UNDULATION: {
+        float dur = 0.82f + 0.06f * lv;
+        vel.x *= 1.0f - Clampf(10.0f * dt, 0, 1);
+        flameGuardT = fmaxf(flameGuardT, fmaxf(dur - stateTimer, 0));
+        formTick -= dt;
+        float R = 112.0f * rngM;
+        if (formTick <= 0) {
+            formTick = 0.11f;
+            multiAttackId = cs.NewId();
+            formSeg++;
+            PlaySfx(SFX_SLASH, 0.35f, 1.2f + 0.06f * formSeg);
+        }
+        AddHit(cs, fx, { pos.x - R, pos.y - R, R * 2.0f, R * 2.0f },
+               8.5f * dmgM, 0, -120, 0.04f, HitKind::Fire, multiAttackId, -1);
+        fx.SlashArc(pos, R, stateTimer * 720.0f, stateTimer * 720.0f + 170.0f, FC);
+        fx.Ring(pos, R * 0.72f, R * 1.05f, 360, 6, CORE);
+        if (fmodf(stateTimer, 0.10f) < dt) {
+            fx.Sparks({ pos.x + frnd(-R, R), pos.y + frnd(-82, 64) }, -90, 360,
+                      3 + lv / 2, CORE, 280, 2.6f);
+            fx.AddShake(0.04f);
+        }
+        if (stateTimer >= dur) {
+            flameGuardT = 0;
+            fx.Ring(pos, 24, R * 1.32f, 620, 8, FC);
+            state = PState::Normal;
+        }
+        break;
+    }
+    // 5 - Flame Tiger: three lunging bites that pin large targets
+    case FF_FLAME_TIGER: {
+        int bites = maxed ? 4 : 3;
+        formTick -= dt;
+        if (formTick <= 0 && formSeg < bites) {
+            formTick = 0.16f / spdM;
+            formSeg++;
+            multiAttackId = cs.NewId();
+            vel.x = facing * (760.0f + 80.0f * formSeg) * spdM;
+            float reach = (142.0f + 14.0f * formSeg) * rngM;
+            Rectangle r = { facing > 0 ? pos.x - 10.0f : pos.x - reach + 10.0f,
+                            pos.y - 56.0f, reach, 112.0f };
+            AddHit(cs, fx, r, (formSeg == bites ? 30.0f : 16.0f) * dmgM,
+                   facing * (formSeg == bites ? 540.0f : 260.0f), -210, 0.06f,
+                   HitKind::Fire, multiAttackId, -1);
+            Vector2 c = { pos.x + facing * reach * 0.45f, pos.y - 6.0f };
+            fx.SlashArc(c, 82.0f + formSeg * 12.0f, -48, 62, FC);
+            FlameBurstLine(fx, { pos.x, pos.y }, facing, reach, 0.75f * flair, lv);
+            if (formSeg == bites) { fx.FireExplosion(c); fx.AddShake(0.34f); fx.AddHitstop(0.05f); }
+            PlaySfx(formSeg == bites ? SFX_EXPLO : SFX_FIRE, 0.55f + 0.08f * formSeg,
+                    1.0f - 0.04f * formSeg);
+        }
+        FlameWake(fx, pos, facing, 0.8f * flair, lv);
+        if (formSeg >= bites && formTick <= 0) { state = PState::Normal; vel.x = facing * 120.0f; }
+        break;
+    }
+    // 6 - Solar Heat Haze: original feint that phases through and backstabs
+    case FF_SOLAR_HEAT_HAZE: {
+        float dur = (maxed ? 0.48f : 0.38f) / spdM;
+        vel.x = facing * 980.0f * spdM;
+        FlameWake(fx, pos, facing, 0.6f * flair, lv);
+        formTick -= dt;
+        if (formTick <= 0) {
+            formTick = 0.09f;
+            multiAttackId = cs.NewId();
+            Rectangle r = { pos.x - 54.0f + facing * 34.0f, pos.y - 42.0f,
+                            108.0f * rngM, 84.0f };
+            AddHit(cs, fx, r, 12.0f * dmgM, facing * 80, -80, 0.04f,
+                   HitKind::Fire, multiAttackId, -1);
+            fx.SlashArc(pos, 72.0f * rngM, facing > 0 ? -32.0f : 212.0f,
+                        facing > 0 ? 32.0f : 148.0f, Fade(FC, 0.85f));
+        }
+        if (!didHitFrame && stateTimer >= dur * 0.62f) {
+            didHitFrame = true;
+            if (hasHunt) {
+                pos.x = Clampf(huntX - facing * 62.0f, 30.0f, (float)cfg::SCREEN_W - 30.0f);
+                facing = huntX > pos.x ? 1 : -1;
+            }
+            Rectangle r = { facing > 0 ? pos.x : pos.x - 132.0f * rngM,
+                            pos.y - 48.0f, 132.0f * rngM, 96.0f };
+            AddHit(cs, fx, r, 34.0f * dmgM, facing * 420, -190, 0.06f,
+                   HitKind::Fire, cs.NewId(), -1);
+            fx.FireExplosion({ pos.x + facing * 58.0f, pos.y - 4.0f });
+            fx.AddHitstop(0.04f);
+            PlaySfx(SFX_WHOOSH, 0.8f, 1.45f);
+        }
+        if (stateTimer >= dur) state = PState::Normal;
+        break;
+    }
+    // 7 - Inferno Wheel: original rolling crowd-clearer
+    case FF_INFERNO_WHEEL: {
+        float dur = 0.62f + 0.04f * lv;
+        vel.x = facing * 520.0f * spdM;
+        formTick -= dt;
+        if (formTick <= 0) { formTick = 0.085f; multiAttackId = cs.NewId(); }
+        float R = 88.0f * rngM;
+        AddHit(cs, fx, { pos.x - R, pos.y - R, R * 2.0f, R * 2.0f },
+               13.0f * dmgM, facing * 170, -260, 0.045f, HitKind::Fire, multiAttackId, -1);
+        fx.SlashArc(pos, R, stateTimer * 1100.0f, stateTimer * 1100.0f + 230.0f, FC);
+        fx.Ring(pos, R * 0.58f, R * 0.98f, 390, 6, CORE);
+        FlameWake(fx, pos, facing, 0.7f * flair, lv);
+        if (stateTimer >= dur) {
+            Rectangle fin = { pos.x - 118.0f * rngM, pos.y - 70.0f,
+                              236.0f * rngM, 132.0f };
+            AddHit(cs, fx, fin, 26.0f * dmgM, facing * 360, -330, 0.06f,
+                   HitKind::Fire, cs.NewId(), -1);
+            fx.FireExplosion({ pos.x + facing * 36.0f, pos.y - 6.0f });
+            fx.AddShake(0.28f);
+            state = PState::Normal;
+        }
+        break;
+    }
+    // 8 - Crimson Lotus Crest: original ranged flame crest and burn field
+    case FF_CRIMSON_LOTUS: {
+        vel.x *= 1.0f - Clampf(8.0f * dt, 0, 1);
+        if (stateTimer < 0.20f) {
+            fx.FireCharge({ pos.x + facing * 34.0f, pos.y - 12.0f });
+        } else {
+            if (formSeg == 0) {
+                formSeg = 1;
+                PlaySfx(SFX_FIRE, 0.8f, 0.82f);
+            }
+            float len = 270.0f * rngM;
+            float waveX = pos.x + facing * (52.0f + stateTimer * 440.0f * spdM);
+            Rectangle r = { facing > 0 ? pos.x + 12.0f : pos.x - len - 12.0f,
+                            pos.y - 62.0f, len, 124.0f };
+            AddHit(cs, fx, r, 10.0f * dmgM, facing * 180, -120, 0.04f,
+                   HitKind::Fire, multiAttackId, -1);
+            FlameBurstLine(fx, { pos.x + facing * 14.0f, pos.y + 8.0f }, facing,
+                           len, 1.05f * flair, lv);
+            if (!didHitFrame && stateTimer >= 0.46f) {
+                didHitFrame = true;
+                Vector2 c = { Clampf(waveX, 60.0f, (float)cfg::SCREEN_W - 60.0f), cfg::GROUND_Y - 36.0f };
+                AddHit(cs, fx, { c.x - 90.0f * rngM, c.y - 76.0f,
+                                 180.0f * rngM, 108.0f }, 32.0f * dmgM,
+                       facing * 320, -260, 0.07f, HitKind::Fire, cs.NewId(), -1);
+                fx.FireExplosion(c);
+                FieldZone z;
+                z.pos = { c.x, cfg::GROUND_Y };
+                z.life = (maxed ? 5.4f : 3.8f); z.tickT = 0; z.isFire = true;
+                zones.push_back(z);
+                fx.AddShake(0.34f); fx.AddHitstop(0.05f);
+            }
+        }
+        if (stateTimer >= 0.62f) state = PState::Normal;
+        break;
+    }
+    // 9 - Rengoku: ultimate destructive charge
+    case FF_RENGOKU: {
+        float dur = 0.95f + 0.04f * lv;
+        if (stateTimer < 0.30f) {
+            vel.x *= 1.0f - Clampf(8.0f * dt, 0, 1);
+            fx.FireCharge(pos);
+            fx.Ring(pos, 20.0f + stateTimer * 170.0f, 120.0f + stateTimer * 170.0f,
+                    420, 7, FC);
+        } else {
+            vel.x = facing * 1320.0f * spdM;
+            FlameWake(fx, pos, facing, 1.25f * flair, lv);
+            Rectangle r = { pos.x - 126.0f + facing * 86.0f, pos.y - 82.0f,
+                            252.0f * rngM, 164.0f };
+            AddHit(cs, fx, r, 48.0f * dmgM, facing * 660, -430, 0.04f,
+                   HitKind::Fire, multiAttackId, -1);
+            if (!didHitFrame && stateTimer >= 0.58f) {
+                didHitFrame = true;
+                Vector2 c = { pos.x + facing * 88.0f, pos.y - 8.0f };
+                AddHit(cs, fx, { c.x - 150.0f * rngM, c.y - 118.0f,
+                                 300.0f * rngM, 218.0f }, 72.0f * dmgM,
+                       facing * 760, -520, 0.10f, HitKind::Fire, cs.NewId(), -1);
+                fx.FireExplosion(c);
+                fx.FireExplosion({ c.x + facing * 64.0f, c.y + 8.0f });
+                fx.Ring(c, 24, 220.0f * rngM, 620, 14, FC);
+                fx.Flash(C(255, 170, 55), 0.24f + lv * 0.025f);
+                fx.AddShake(0.75f); fx.AddHitstop(0.12f);
+                PlaySfx(SFX_EXPLO, 1.0f, 0.75f);
+            }
+        }
+        if (stateTimer >= dur) { state = PState::Normal; vel.x = facing * 110.0f; }
+        break;
+    }
+    default:
+        state = PState::Normal;
+        break;
+    }
+}
+
 void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
     UpdateTechs(dt, cs, fx);     // techniques outlive states, even death throes
 
@@ -533,7 +888,9 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
 
     for (int i = 0; i < STYLE_COUNT; i++) cd[i] = fmaxf(cd[i] - dt, 0);
     for (int i = 0; i < WATER_FORM_COUNT; i++) waterCd[i] = fmaxf(waterCd[i] - dt, 0);
+    for (int i = 0; i < FLAME_FORM_COUNT; i++) flameCd[i] = fmaxf(flameCd[i] - dt, 0);
     deadCalmT = fmaxf(deadCalmT - dt, 0);
+    flameGuardT = fmaxf(flameGuardT - dt, 0);
     iframes = fmaxf(iframes - dt, 0);
     hurtFlash = fmaxf(hurtFlash - dt, 0);
     hiddenT = fmaxf(hiddenT - dt, 0);
@@ -600,11 +957,9 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
                 // Water Breathing: eleven forms, each on its own number key
                 TryStartWaterForm(cs, fx);
             }
-            else if (styleP[STYLE_FIRE] && cd[STYLE_FIRE] <= 0) {
-                state = PState::FireWindup;
-                stateTimer = 0;
-                vel.x = 0;
-                PlaySfx(SFX_FIRE, 0.6f, 1.15f);
+            else if (equipped == STYLE_FIRE) {
+                // Flame Breathing: nine forms, each on its own number key
+                TryStartFlameForm(cs, fx);
             }
             else if (styleP[STYLE_STONE] && cd[STYLE_STONE] <= 0) {
                 state = PState::Stone;
@@ -728,6 +1083,9 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
         }
         case PState::WaterForm:
             UpdateWaterForm(dt, cs, fx);
+            break;
+        case PState::FlameForm:
+            UpdateFlameForm(dt, cs, fx);
             break;
         case PState::FireWindup: {
             stateTimer += dt;
@@ -920,6 +1278,7 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
 
     // physics (dashes and weaves manage their own vertical motion)
     bool noGravity = (state == PState::Water || state == PState::WaterForm ||
+                      state == PState::FlameForm ||
                       state == PState::Plunge ||
                       state == PState::Serpent || state == PState::Mist);
     if (!noGravity) vel.y += cfg::GRAVITY * dt;
@@ -1125,6 +1484,27 @@ void Player::Draw() const {
                 default:                 ang = -28.0f + sinf(gt * 40.0f) * 22.0f; break;
             }
             break;
+        case PState::FlameForm:
+            switch (flameForm) {
+                case FF_UNKNOWING_FIRE:
+                case FF_SOLAR_HEAT_HAZE:
+                case FF_RENGOKU:
+                    ang = 0; break;
+                case FF_RISING_SUN:
+                    ang = -78.0f; break;
+                case FF_BLAZING_UNIVERSE:
+                    ang = stateTimer < 0.28f ? -106.0f : 68.0f; break;
+                case FF_BLOOMING_UNDULATION:
+                case FF_INFERNO_WHEEL:
+                    ang = fmodf(gt * 1550.0f, 360.0f); spinBlade = true; break;
+                case FF_FLAME_TIGER:
+                    ang = sinf(gt * 42.0f) * 58.0f; break;
+                case FF_CRIMSON_LOTUS:
+                    ang = stateTimer < 0.20f ? -92.0f : 14.0f; break;
+                default:
+                    ang = -24.0f; break;
+            }
+            break;
         case PState::Love:       ang = fmodf(gt * 1300.0f, 360.0f); spinBlade = true; break;
         case PState::Serpent:    ang = 8.0f + sinf(gt * 46.0f) * 55.0f; break;
         case PState::Wind:
@@ -1150,7 +1530,8 @@ void Player::Draw() const {
     Rectangle blade = { hand.x, hand.y, 46, 4.5f };
     Color bladeCol = C(210, 220, 235);
     if (state == PState::Water || state == PState::WaterForm) bladeCol = C(120, 200, 255);
-    if (state == PState::FireWindup || state == PState::FireRecover) bladeCol = C(255, 170, 90);
+    if (state == PState::FireWindup || state == PState::FireRecover || state == PState::FlameForm)
+        bladeCol = C(255, 170, 90);
     if (state == PState::Stone) bladeCol = C(190, 182, 170);
     if (state == PState::Love)  bladeCol = C(255, 150, 205);
     if (state == PState::Serpent) bladeCol = C(140, 225, 110);
@@ -1199,6 +1580,58 @@ void Player::Draw() const {
                                  94.0f, s0, s1, 28, Fade(aura, 0.16f * alpha));
                 break;
             }
+        }
+    }
+
+    if (state == PState::FlameForm) {
+        int lv = prog ? prog->flame.Level(flameForm) : 1;
+        float pulse = 0.5f + 0.5f * sinf(gt * 16.0f);
+        Color aura = FlameCol(lv);
+        float scale = 1.0f + 0.12f * (lv - 1);
+        switch (flameForm) {
+            case FF_BLOOMING_UNDULATION:
+                DrawRing(pos, 58.0f * scale, 64.0f * scale, 0, 360, 56,
+                         Fade(C(255, 235, 160), 0.34f * alpha));
+                DrawRing(pos, 104.0f * scale, 111.0f * scale, gt * 260.0f,
+                         gt * 260.0f + 290.0f, 64, Fade(aura, 0.30f * alpha));
+                break;
+            case FF_RISING_SUN:
+                DrawCircleSector({ pos.x + facing * 10.0f, pos.y - 22.0f },
+                                 108.0f * scale,
+                                 facing > 0 ? 130.0f : 50.0f,
+                                 facing > 0 ? 275.0f : -95.0f,
+                                 28, Fade(aura, 0.20f * alpha));
+                break;
+            case FF_BLAZING_UNIVERSE:
+            case FF_CRIMSON_LOTUS:
+                DrawCircleV({ pos.x + facing * 54.0f, pos.y - 20.0f },
+                            30.0f + 10.0f * pulse * scale, Fade(aura, 0.18f * alpha));
+                DrawCircleV({ pos.x + facing * 54.0f, pos.y - 20.0f },
+                            14.0f + 6.0f * pulse * scale, Fade(C(255, 238, 170), 0.26f * alpha));
+                break;
+            case FF_FLAME_TIGER:
+                DrawCircleSector({ pos.x + facing * 46.0f, pos.y - 2.0f },
+                                 92.0f * scale, facing > 0 ? -52.0f : 232.0f,
+                                 facing > 0 ? 58.0f : 122.0f, 26, Fade(aura, 0.22f * alpha));
+                break;
+            case FF_INFERNO_WHEEL:
+                DrawRing(pos, 48.0f + pulse * 18.0f, 56.0f + pulse * 18.0f,
+                         0, 360, 48, Fade(aura, 0.32f * alpha));
+                DrawRing(pos, 88.0f * scale, 94.0f * scale, gt * 300.0f,
+                         gt * 300.0f + 250.0f, 48, Fade(C(255, 230, 150), 0.24f * alpha));
+                break;
+            case FF_RENGOKU:
+                DrawLineEx({ pos.x - facing * 104.0f, pos.y + 14.0f },
+                           { pos.x + facing * 154.0f, pos.y - 8.0f },
+                           12.0f * scale, Fade(aura, 0.22f * alpha));
+                DrawRing(pos, 110.0f + pulse * 24.0f, 118.0f + pulse * 24.0f,
+                         0, 360, 56, Fade(aura, 0.20f * alpha));
+                break;
+            default:
+                DrawLineEx({ pos.x - facing * 64.0f, pos.y + 10.0f },
+                           { pos.x + facing * 110.0f, pos.y - 6.0f },
+                           8.0f * scale, Fade(aura, 0.18f * alpha));
+                break;
         }
     }
 

@@ -4,8 +4,9 @@
 //   J          : 4-hit sword combo
 //   UP + J     : upward launcher slash
 //   DOWN + J   : plunging strike (airborne)
-//   K L I O U H M (or 1-7) : Water, Fire, Stone, Love,
-//                            Serpent, Wind, Mist Breathing
+//   Number keys : equipped Breathing Style
+//                 Water uses 1-9, 0, - for forms; Flame uses 1-9.
+//                 Other styles use 1.
 //
 // All Breathing Styles scale with the Progression upgrade trees
 // (damage / cooldown / reach) and gain Mastery variants.
@@ -19,7 +20,7 @@ class Effects;
 
 enum class PState {
     Normal, Attack, UpSlash, Plunge,
-    Water, WaterForm, FireWindup, FireRecover, Stone, Love,
+    Water, WaterForm, FlameForm, FireWindup, FireRecover, Stone, Love,
     Serpent, Wind, Mist,
     Hurt, Dead
 };
@@ -65,6 +66,8 @@ public:
     int   equipped = STYLE_WATER; // the one Breathing Style carried into this run
     float waterCd[WATER_FORM_COUNT] = {}; // per-form cooldowns (Water Breathing)
     int   waterForm = -1;        // active Water form while in PState::WaterForm
+    float flameCd[FLAME_FORM_COUNT] = {}; // per-form cooldowns (Flame Breathing)
+    int   flameForm = -1;        // active Flame form while in PState::FlameForm
     float iframes = 0;
 
     // Eleventh Form: Dead Calm nullifies enemy attacks in a zone around the
@@ -72,6 +75,10 @@ public:
     bool  DeadCalmActive() const { return deadCalmT > 0; }
     Rectangle DeadCalmZone() const {
         return { pos.x - 130, pos.y - 120, 260, 200 };
+    }
+    bool  FlameGuardActive() const { return flameGuardT > 0; }
+    Rectangle FlameGuardZone() const {
+        return { pos.x - 145, pos.y - 135, 290, 220 };
     }
     HitMemory hitMem;            // enemy attack ids that already connected
     PState state = PState::Normal;
@@ -96,6 +103,8 @@ private:
     // form's state machine each frame.
     bool TryStartWaterForm(CombatSystem& cs, Effects& fx);
     void UpdateWaterForm(float dt, CombatSystem& cs, Effects& fx);
+    bool TryStartFlameForm(CombatSystem& cs, Effects& fx);
+    void UpdateFlameForm(float dt, CombatSystem& cs, Effects& fx);
     // central hitbox spawner: applies style damage upgrades + mist ambush
     void AddHit(CombatSystem& cs, Effects& fx, Rectangle r, float dmg,
                 float kbx, float kby, float life, HitKind kind, int id, int style);
@@ -117,6 +126,7 @@ private:
     int   formSeg = 0;           // segment counter for multi-hit Water forms
     float formTick = 0;          // re-arm timer for multi-hit Water forms
     float deadCalmT = 0;         // Dead Calm nullification window remaining
+    float flameGuardT = 0;       // Fourth Form defensive nullification window
     float hurtLen = 0.28f;       // current hitstun duration
     float hurtFlash = 0;
     float runPhase = 0;

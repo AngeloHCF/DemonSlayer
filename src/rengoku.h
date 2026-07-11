@@ -30,7 +30,7 @@ struct RengokuMastery {
     float DmgTaken() const    { return 0.96f - 0.04f * Level(); }
     float DmgMult() const     { return 1.05f + 0.12f * Level(); }
     float Cadence() const     { return 1.25f - 0.07f * Level(); }
-    float FlamingWallShield() const { return 20.0f + 12.0f * Level(); }
+    float BloomingGuardShield() const { return 20.0f + 12.0f * Level(); }
     bool  HasNinthForm() const { return Level() >= 5; }
 
     void Load();
@@ -41,9 +41,12 @@ enum class RengokuState {
     Inactive, Arrive, Follow,
     FormUnknowing,     // First Form: Unknowing Fire
     FormRisingSun,     // Second Form: Rising Scorching Sun
-    FormBlazing,       // Fifth Form: Flame Tiger / Blazing Universe hit
-    FormTiger,
-    FlamingWall,       // ultimate guard: blocks projectiles in front
+    FormBlazing,       // Third Form: Blazing Universe
+    FormBlooming,      // Fourth Form: Blooming Flame Undulation
+    FormTiger,         // Fifth Form: Flame Tiger
+    FormSolarHeat,     // Sixth Form: Solar Heat Haze
+    FormInfernoWheel,  // Seventh Form: Inferno Wheel
+    FormCrimsonLotus,  // Eighth Form: Crimson Lotus Crest
     NinthForm,         // Ninth Form: Rengoku
     Withdraw, Fallen
 };
@@ -84,7 +87,8 @@ private:
     float stateTimer = 0;
     float attackTimer = 0;
     RengokuState lastForm = RengokuState::Inactive;
-    float blazingCd = 0, tigerCd = 0, ninthCd = 0;
+    float blazingCd = 0, bloomingCd = 0, tigerCd = 0, hazeCd = 0;
+    float wheelCd = 0, lotusCd = 0, ninthCd = 0;
     float tickT = 0;
     int   curId = -1;
     int   formHits = 0;

@@ -26,7 +26,7 @@
 | Key | Style | Feel |
 |---|---|---|
 | **K** / 1 | **Water** | Flowing multi-hit dash, evasive, slows enemies (3.5s) |
-| **L** / 2 | **Fire** | Explosive burst, heavy knockback, screen shake (8s) |
+| **1-9** | **Flame** | Nine Flame Breathing forms with individual cooldowns, hitboxes, and mastery levels |
 | **I** / 3 | **Stone** | Slow crushing slam; breaks brute armor & Muzan's guard (10s) |
 | **O** / 4 | **Love** | Agile homing dash-dance that mends your wounds (6s) |
 | **U** / 5 | **Serpent** | Weaving venomous flurry — poison ticks after the cuts (5s) |
@@ -52,12 +52,12 @@ Press **B** to summon Shinobu as fast support. She is more fragile than Giyu, bu
 
 ## Kyojuro Rengoku — the Flame Hashira
 
-Press **R** to summon Rengoku as explosive support. He is the burst-damage ally: **Unknowing Fire**, **Rising Scorching Sun**, **Blazing Universe**, and **Flame Tiger** launch demons and create openings through raw pressure. At maximum mastery he unlocks **Ninth Form: Rengoku**, a high-commitment charge that burns through the field.
+Press **R** to summon Rengoku as explosive support. He now uses the full Flame Breathing kit: **Unknowing Fire**, **Rising Scorching Sun**, **Blazing Universe**, **Blooming Flame Undulation**, **Flame Tiger**, **Solar Heat Haze**, **Inferno Wheel**, **Crimson Lotus Crest**, and at maximum mastery **Ninth Form: Rengoku**.
 
 - **He cannot slay the final bosses alone** — his Flame Hashira damage is resisted by Upper Moons and Muzan, but heavy forms can still force openings.
-- **Ultimate guard:** when Akaza, Kokushibo, or Muzan enters a desperation ultimate, active Rengoku raises **Flaming Wall** in front of him. The wall burns away projectiles, hostile hitboxes, and blast rings until its shield health is spent.
+- **Ultimate guard:** when Akaza, Kokushibo, or Muzan enters a desperation ultimate, active Rengoku uses **Blooming Flame Undulation**. The rotating fire guard burns away projectiles, hostile hitboxes, and blast rings until its shield health is spent.
 - **If Rengoku falls, he is gone for the rest of the run.**
-- **Mastery persists across runs** (saved to `rengoku_mastery.txt` next to the exe): he earns XP from kills, openings, safe withdrawals, and victories. Each level increases Flaming Wall shield health.
+- **Mastery persists across runs** (saved to `rengoku_mastery.txt` next to the exe): he earns XP from kills, openings, safe withdrawals, and victories. Each level increases Blooming Flame Undulation guard durability.
 
 ## Gyomei Himejima — the Stone Hashira
 
@@ -105,13 +105,15 @@ If a Hashira falls during an encounter, that summon slot stays committed until t
 
 ## Progression
 
-Clearing a wave grants **+2 upgrade points** (and a heal). Press **TAB** any time in battle to open the upgrade menu. Every style has its own tree:
+Clearing a wave grants **+2 upgrade points** (and a heal). Press **TAB** any time in battle to open the upgrade menu. Water and Flame use form shops where each form levels 1-5 independently; other styles use a shared tree:
 
 - **POWER** — +30% damage per level (3 levels, 1 pt each)
 - **FLOW** — −18% cooldown per level (3 levels, 1 pt each)
 - **REACH** — +20% range, duration & technique speed per level (3 levels, 1 pt each)
 - **MASTERY** (2 pts) — a unique stronger/alternate move per style:
-  Water dashes back through the line · Fire leaves burning ground · Stone launches a ground-splitting quake · Love gains five dashes + double lifesteal · Serpent ends in a venomous twin-fang bite · Wind releases twin cyclones · Mist leaves a lingering slowing cloud
+  Stone launches a ground-splitting quake · Love gains five dashes + double lifesteal · Serpent ends in a venomous twin-fang bite · Wind releases twin cyclones · Mist leaves a lingering slowing cloud
+
+Flame's Fourth Form, **Blooming Flame Undulation**, is the defensive form built to burn away Akaza, Kokushibo, and Muzan attacks.
 
 ## The gauntlet — one long night
 The campaign is now **17 waves with three Upper Moons standing between you and Muzan**:
@@ -161,7 +163,7 @@ c++ src/*.cpp -o demonslayer -std=c++17 -O2 $(pkg-config --libs --cflags raylib)
 ```
 
 ## Dev flags
-`./demonslayer --demo` skips the title screen; `--akaza`, `--douma`, `--koku`, and `--boss` jump straight to Akaza / Douma / Kokushibo / Muzan. Add `--unlock-all` to start with every style track and mastery unlocked. During a run, press **F8** to toggle developer invincibility.
+`./demonslayer --demo` skips the title screen; `--akaza`, `--douma`, `--koku`, and `--boss` jump straight to Akaza / Douma / Kokushibo / Muzan. Add `--unlock-all` to start with every style track, Water form, Flame form, and mastery unlocked. In the upgrade shop, **Q / E** swaps the dev shop style. During a run, press **F8** to toggle developer invincibility.
 
 ## Code layout
 ```

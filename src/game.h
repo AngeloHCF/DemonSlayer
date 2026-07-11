@@ -82,7 +82,7 @@ private:
     StyleUnlocks unlocks;              // which styles may be equipped (persists across runs)
     int   selectedStyle = STYLE_WATER; // the style carried into the next run
     int   styleSelCursor = 0;          // selection-menu cursor
-    bool  devUnlockAll = false;        // --unlock-all: also max the equipped style's tree
+    bool  devUnlockAll = false;        // --unlock-all: max every style and form
     Giyu giyu;
     Shinobu shinobu;
     Rengoku rengoku;

@@ -19,9 +19,8 @@ enum StyleId {
 
 enum UpTrack { TRACK_POWER, TRACK_FLOW, TRACK_REACH, TRACK_MASTERY };
 
-// The number key that activates the equipped Breathing Style. Only one style is
-// ever equipped, so every style uses the same key: 1. Keep STYLE_INFO[].key
-// (game.cpp) in sync with this.
+// The number key that activates a simple equipped Breathing Style. Water and
+// Flame override this with per-form number keys.
 inline int StyleKeyNumber(int /*s*/) { return 1; }
 
 // ---------------------------------------------------------------
@@ -85,6 +84,19 @@ enum WaterForm {
     WATER_FORM_COUNT
 };
 
+enum FlameForm {
+    FF_UNKNOWING_FIRE,       // 1  Unknowing Fire
+    FF_RISING_SUN,           // 2  Rising Scorching Sun
+    FF_BLAZING_UNIVERSE,     // 3  Blazing Universe
+    FF_BLOOMING_UNDULATION,  // 4  Blooming Flame Undulation
+    FF_FLAME_TIGER,          // 5  Flame Tiger
+    FF_SOLAR_HEAT_HAZE,      // 6  Solar Heat Haze (original)
+    FF_INFERNO_WHEEL,        // 7  Inferno Wheel (original)
+    FF_CRIMSON_LOTUS,        // 8  Crimson Lotus Crest (original)
+    FF_RENGOKU,              // 9  Rengoku
+    FLAME_FORM_COUNT
+};
+
 // base cooldown (seconds) per form, before the per-level reduction.
 // shared by the player (execution) and game (HUD ring / menu display).
 inline float WaterFormBaseCd(int f) {
@@ -92,6 +104,13 @@ inline float WaterFormBaseCd(int f) {
         1.2f, 3.0f, 4.0f, 2.6f, 5.0f, 3.6f, 1.8f, 3.2f, 4.6f, 6.5f, 9.0f
     };
     return (f >= 0 && f < WATER_FORM_COUNT) ? cd[f] : 1.0f;
+}
+
+inline float FlameFormBaseCd(int f) {
+    static const float cd[FLAME_FORM_COUNT] = {
+        1.4f, 2.8f, 4.2f, 6.5f, 5.2f, 3.4f, 4.8f, 5.8f, 10.5f
+    };
+    return (f >= 0 && f < FLAME_FORM_COUNT) ? cd[f] : 1.0f;
 }
 
 struct WaterForms {
@@ -115,16 +134,37 @@ struct WaterForms {
     float SpeedMult(int f) const { return 1.0f + 0.09f * (Level(f) - 1); } // -> 1.36x
 };
 
+struct FlameForms {
+    int level[FLAME_FORM_COUNT];   // 1..5 (never 0)
+
+    FlameForms() { Reset(); }
+    void Reset()   { for (int i = 0; i < FLAME_FORM_COUNT; i++) level[i] = 1; }
+    void MaxAll()  { for (int i = 0; i < FLAME_FORM_COUNT; i++) level[i] = 5; }
+
+    int  Level(int f) const { return (f >= 0 && f < FLAME_FORM_COUNT) ? level[f] : 1; }
+    bool Maxed(int f) const { return Level(f) >= 5; }
+
+    int  Cost(int f) const { return Level(f); }
+    bool CanUpgrade(int f, int points) const { return !Maxed(f) && points >= Cost(f); }
+
+    float DmgMult(int f)   const { return 1.0f + 0.30f * (Level(f) - 1); } // -> 2.20x
+    float RangeMult(int f) const { return 1.0f + 0.12f * (Level(f) - 1); } // -> 1.48x
+    float CdMult(int f)    const { return 1.0f - 0.09f * (Level(f) - 1); } // -> 0.64x
+    float SpeedMult(int f) const { return 1.0f + 0.08f * (Level(f) - 1); } // -> 1.32x
+};
+
 class Progression {
 public:
     int points = 0;
     StyleUpgrades up[STYLE_COUNT];
     WaterForms water;                 // Water Breathing's eleven per-form levels
+    FlameForms flame;                 // Flame Breathing's nine per-form levels
 
     void Reset() {
         points = 0;
         for (int i = 0; i < STYLE_COUNT; i++) up[i] = StyleUpgrades{};
         water.Reset();                // every run begins at Level 1 in each form
+        flame.Reset();
     }
 
     void UnlockAll() {
@@ -136,6 +176,7 @@ public:
             up[i].mastery = true;
         }
         water.MaxAll();
+        flame.MaxAll();
     }
 
     float DmgMult(int s) const   { return 1.0f + 0.30f * up[s].power; }
