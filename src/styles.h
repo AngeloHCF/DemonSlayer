@@ -106,6 +106,16 @@ enum StoneForm {
     STONE_FORM_COUNT
 };
 
+enum LoveForm {
+    LF_SHIVERS_FIRST_LOVE,       // 1 First Form: Shivers of First Love
+    LF_LOVE_PANGS,               // 2 Second Form: Love Pangs
+    LF_CATLOVE_SHOWER,           // 3 Third Form: Catlove Shower
+    LF_SWAYING_WILDCLAW,         // 4 Fifth Form: Swaying Love, Wildclaw
+    LF_CAT_LEGGED_WINDS,         // 5 Sixth Form: Cat-Legged Winds of Love
+    LF_RIPPING_KITTY_TEMPEST,    // 6 Final Form: Ripping Kitty Tempest of Love
+    LOVE_FORM_COUNT
+};
+
 // Flame Fighting Styles are passive loadouts layered on top of Flame
 // Breathing's per-form mastery. Only one can be equipped at a time.
 enum FlameFightingStyle {
@@ -138,6 +148,13 @@ inline float StoneFormBaseCd(int f) {
         3.8f, 5.6f, 8.5f, 6.8f, 14.0f
     };
     return (f >= 0 && f < STONE_FORM_COUNT) ? cd[f] : 1.0f;
+}
+
+inline float LoveFormBaseCd(int f) {
+    static const float cd[LOVE_FORM_COUNT] = {
+        1.35f, 3.25f, 4.4f, 5.7f, 6.4f, 11.5f
+    };
+    return (f >= 0 && f < LOVE_FORM_COUNT) ? cd[f] : 1.0f;
 }
 
 struct WaterForms {
@@ -198,6 +215,26 @@ struct StoneForms {
     float CdMult(int f)     const { return 1.0f - 0.08f * (Level(f) - 1); } // -> 0.68x
     float SpeedMult(int f)  const { return 1.0f + 0.045f * (Level(f) - 1); } // -> 1.18x
     float GuardMult(int f)  const { return 1.0f + 0.24f * (Level(f) - 1); } // -> 1.96x
+};
+
+struct LoveForms {
+    int level[LOVE_FORM_COUNT];    // 1..5
+
+    LoveForms() { Reset(); }
+    void Reset()   { for (int i = 0; i < LOVE_FORM_COUNT; i++) level[i] = 1; }
+    void MaxAll()  { for (int i = 0; i < LOVE_FORM_COUNT; i++) level[i] = 5; }
+
+    int  Level(int f) const { return (f >= 0 && f < LOVE_FORM_COUNT) ? level[f] : 1; }
+    bool Maxed(int f) const { return Level(f) >= 5; }
+
+    int  Cost(int f) const { return Level(f); }
+    bool CanUpgrade(int f, int points) const { return !Maxed(f) && points >= Cost(f); }
+
+    float DmgMult(int f)   const { return 1.0f + 0.27f * (Level(f) - 1); } // -> 2.08x
+    float RangeMult(int f) const { return 1.0f + 0.12f * (Level(f) - 1); } // -> 1.48x
+    float CdMult(int f)    const { return 1.0f - 0.09f * (Level(f) - 1); } // -> 0.64x
+    float SpeedMult(int f) const { return 1.0f + 0.09f * (Level(f) - 1); } // -> 1.36x
+    float MendMult(int f)  const { return 1.0f + 0.12f * (Level(f) - 1); } // -> 1.48x
 };
 
 struct FlameFightingStyles {
@@ -330,6 +367,7 @@ public:
     WaterForms water;                 // Water Breathing's eleven per-form levels
     FlameForms flame;                 // Flame Breathing's nine per-form levels
     StoneForms stone;                 // Stone Breathing's five per-form levels
+    LoveForms love;                   // Love Breathing's six per-form levels
     FlameFightingStyles flameStyle;    // Flame-only passive Fighting Style loadout
 
     void Reset() {
@@ -338,6 +376,7 @@ public:
         water.Reset();                // every run begins at Level 1 in each form
         flame.Reset();
         stone.Reset();
+        love.Reset();
         flameStyle.Reset();
     }
 
@@ -352,6 +391,7 @@ public:
         water.MaxAll();
         flame.MaxAll();
         stone.MaxAll();
+        love.MaxAll();
         flameStyle.MaxAll();
     }
 

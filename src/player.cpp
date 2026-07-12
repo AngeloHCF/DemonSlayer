@@ -24,7 +24,6 @@ static const float WATER_TIME   = 0.38f;   // water dash duration
 static const float FIRE_WINDUP  = 0.48f;   // fire charge-up
 static const float STONE_WINDUP = 0.65f;   // stone heave before the slam
 static const float STONE_TOTAL  = 1.3f;    // full stone technique
-static const float LOVE_SEG_T   = 0.18f;   // love: each dash segment
 static const float SERP_TIME    = 0.85f;   // serpent weave duration
 static const float WIND_WINDUP  = 0.35f;   // wind gathering before the sweep
 static const float MIST_BLINK   = 0.16f;   // mist blink dash
@@ -83,6 +82,26 @@ static void StoneBurst(Effects& fx, Vector2 p, float power, int lv) {
 static void StoneChainTrail(Effects& fx, Vector2 p, int facing, int lv) {
     fx.Sparks(p, facing > 0 ? 180.0f : 0.0f, 52, 3 + lv / 2, StoneCore(lv), 290 + 38 * lv, 2.2f);
     if (GetRandomValue(0, 2) == 0) fx.Dust({ p.x + frnd(-18, 18), cfg::GROUND_Y });
+}
+
+static Color LoveCol(int lv) {
+    return lv >= 5 ? C(255, 218, 238) : (lv >= 3 ? C(255, 150, 205) : C(235, 104, 176));
+}
+
+static Color LoveCore(int lv) {
+    return lv >= 4 ? C(255, 238, 248) : C(255, 190, 225);
+}
+
+static void LoveFlourish(Effects& fx, Vector2 p, int facing, float scale, int lv) {
+    Color love = LoveCol(lv);
+    Color core = LoveCore(lv);
+    fx.LoveSparkle(p, facing);
+    fx.Sparks(p, facing > 0 ? 180.0f : 0.0f, 62, 2 + lv / 2, core, 260.0f * scale, 2.0f * scale);
+    if (GetRandomValue(0, 2) == 0) {
+        fx.SlashArc({ p.x + facing * 10.0f, p.y - 4.0f }, 58.0f * scale,
+                    facing > 0 ? -58.0f : 238.0f,
+                    facing > 0 ? 58.0f : 122.0f, love);
+    }
 }
 
 static constexpr float RUN_BASE_HP = 200.0f;
@@ -263,7 +282,8 @@ void Player::Reset(Vector2 spawn) {
     for (int i = 0; i < WATER_FORM_COUNT; i++) waterCd[i] = 0;
     for (int i = 0; i < FLAME_FORM_COUNT; i++) flameCd[i] = 0;
     for (int i = 0; i < STONE_FORM_COUNT; i++) stoneCd[i] = 0;
-    waterForm = -1; flameForm = -1; stoneForm = -1;
+    for (int i = 0; i < LOVE_FORM_COUNT; i++) loveCd[i] = 0;
+    waterForm = -1; flameForm = -1; stoneForm = -1; loveForm = -1;
     formSeg = 0; formTick = 0; deadCalmT = 0; flameGuardT = 0; stoneGuardT = 0;
     flameGuardDurability = flameGuardDurabilityMax = 0; flameGuardRekindled = false;
     stoneGuardDurability = stoneGuardDurabilityMax = 0; stoneGuardReinforced = false;
@@ -274,7 +294,7 @@ void Player::Reset(Vector2 spawn) {
     stateTimer = 0; comboStage = 0;
     comboQueued = false; didHitFrame = false;
     multiAttackId = -1; waterTick = 0; waterPass = 0;
-    loveSeg = 0; serpentTick = 0;
+    serpentTick = 0;
     crouchT = 0; chillT = 0; hiddenT = 0; mistAmbushT = 0;
     invincible = false;
     hurtLen = 0.28f;
@@ -1351,6 +1371,309 @@ void Player::UpdateStoneForm(float dt, CombatSystem& cs, Effects& fx) {
     }
 }
 
+// --- Love Breathing: six flexible sword forms -------------------------------
+bool Player::TryStartLoveForm(CombatSystem& cs, Effects& fx) {
+    static const int FKEY[LOVE_FORM_COUNT] = {
+        KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR, KEY_FIVE, KEY_SIX
+    };
+    static const char* FORM_CALL[LOVE_FORM_COUNT] = {
+        "SHIVERS OF FIRST LOVE", "LOVE PANGS", "CATLOVE SHOWER",
+        "SWAYING WILDCLAW", "CAT-LEGGED WINDS", "RIPPING KITTY TEMPEST"
+    };
+
+    int f = -1;
+    for (int i = 0; i < LOVE_FORM_COUNT; i++)
+        if (IsKeyPressed(FKEY[i])) { f = i; break; }
+    if (f < 0) return false;
+    if (loveCd[f] > 0) { PlaySfx(SFX_PICKUP, 0.22f, 0.55f); return false; }
+
+    int lv = prog ? prog->love.Level(f) : 1;
+    loveForm = f;
+    state = PState::Love;
+    stateTimer = 0;
+    didHitFrame = false;
+    formSeg = 0;
+    formTick = 0;
+    multiAttackId = cs.NewId();
+    loveCd[f] = LoveFormBaseCd(f) * (prog ? prog->love.CdMult(f) : 1.0f);
+
+    if (hasHunt && (f == LF_SHIVERS_FIRST_LOVE || f == LF_SWAYING_WILDCLAW ||
+                    f == LF_RIPPING_KITTY_TEMPEST))
+        facing = huntX > pos.x ? 1 : -1;
+
+    switch (f) {
+        case LF_SHIVERS_FIRST_LOVE:
+            iframes = fmaxf(iframes, 0.22f + 0.02f * lv);
+            PlaySfx(SFX_LOVE, 0.86f, 1.24f);
+            break;
+        case LF_LOVE_PANGS:
+            iframes = fmaxf(iframes, 0.18f + 0.02f * lv);
+            PlaySfx(SFX_LOVE, 0.74f, 1.12f);
+            break;
+        case LF_CATLOVE_SHOWER:
+            iframes = fmaxf(iframes, 0.36f + 0.04f * lv);
+            fx.Ring(pos, 16, 118.0f + 12.0f * lv, 460, 6, LoveCol(lv));
+            PlaySfx(SFX_LOVE, 0.78f, 1.02f);
+            break;
+        case LF_SWAYING_WILDCLAW:
+            iframes = fmaxf(iframes, 0.28f + 0.03f * lv);
+            PlaySfx(SFX_LOVE, 0.9f, 0.92f);
+            break;
+        case LF_CAT_LEGGED_WINDS:
+            iframes = fmaxf(iframes, 0.48f + 0.04f * lv);
+            fx.Ring(pos, 24, 145.0f + 12.0f * lv, 520, 8, LoveCore(lv));
+            PlaySfx(SFX_LOVE, 0.86f, 0.84f);
+            break;
+        case LF_RIPPING_KITTY_TEMPEST:
+            iframes = fmaxf(iframes, 0.82f + 0.04f * lv);
+            vel.y = -420.0f;
+            fx.Flash(C(255, 118, 198), 0.12f + 0.02f * lv);
+            fx.Ring(pos, 28, 210.0f + 18.0f * lv, 620, 10, LoveCol(lv));
+            PlaySfx(SFX_LOVE, 1.0f, 0.72f);
+            break;
+    }
+
+    fx.Text({ pos.x, pos.y - h - 18 }, LoveCol(lv), 0.92f, "%s", FORM_CALL[f]);
+    LoveFlourish(fx, pos, facing, 0.95f + 0.10f * lv, lv);
+    return true;
+}
+
+void Player::UpdateLoveForm(float dt, CombatSystem& cs, Effects& fx) {
+    stateTimer += dt;
+    if (!prog) { state = PState::Normal; return; }
+    LoveForms& lf = prog->love;
+    const int f = loveForm;
+    const int lv = lf.Level(f);
+    const bool maxed = lf.Maxed(f);
+    const float dmgM = lf.DmgMult(f);
+    const float rngM = lf.RangeMult(f);
+    const float spdM = lf.SpeedMult(f);
+    const float flair = 0.88f + 0.12f * (lv - 1);
+    const Color LC = LoveCol(lv);
+    const Color CORE = LoveCore(lv);
+
+    switch (f) {
+    // 1 - Shivers of First Love: fast, sweeping strike at tremendous speed
+    case LF_SHIVERS_FIRST_LOVE: {
+        float dur = (maxed ? 0.34f : 0.25f) / spdM;
+        vel.x = facing * 1160.0f * spdM;
+        vel.y = 0;
+        LoveFlourish(fx, pos, facing, 0.78f * flair, lv);
+        Rectangle r = { pos.x - 76.0f + facing * 52.0f, pos.y - 44.0f,
+                        152.0f * rngM, 88.0f };
+        AddHit(cs, fx, r, 21.0f * dmgM, facing * 330, -180, 0.035f,
+               HitKind::Love, multiAttackId, -1);
+        if (!didHitFrame && stateTimer >= 0.07f) {
+            didHitFrame = true;
+            fx.SlashArc(pos, 104.0f * rngM, facing > 0 ? -72.0f : 252.0f,
+                        facing > 0 ? 72.0f : 108.0f, CORE);
+            fx.Ring({ pos.x + facing * 44.0f, pos.y - 2.0f }, 8, 84.0f * rngM, 560, 5, LC);
+            fx.AddHitstop(0.03f);
+            PlaySfx(SFX_SLASH, 0.55f, 1.45f);
+        }
+        if (maxed && formSeg == 0 && stateTimer >= 0.16f / spdM) {
+            formSeg = 1;
+            Rectangle second = { facing > 0 ? pos.x - 12.0f : pos.x - 132.0f * rngM + 12.0f,
+                                 pos.y - 54.0f, 132.0f * rngM, 104.0f };
+            AddHit(cs, fx, second, 17.0f * dmgM, facing * 370, -220, 0.055f,
+                   HitKind::Love, cs.NewId(), -1);
+            fx.SlashArc(pos, 118.0f * rngM, facing > 0 ? 72.0f : 108.0f,
+                        facing > 0 ? -72.0f : 252.0f, LC);
+        }
+        if (stateTimer >= dur) { state = PState::Normal; vel.x = facing * 140.0f; }
+        break;
+    }
+    // 2 - Love Pangs: rapid whip-like slashes over a wide area
+    case LF_LOVE_PANGS: {
+        int lashes = maxed ? 7 : 5;
+        vel.x *= 1.0f - Clampf(7.0f * dt, 0, 1);
+        vel.y = 0;
+        formTick -= dt;
+        if (formTick <= 0 && formSeg < lashes) {
+            formTick = 0.105f / spdM;
+            formSeg++;
+            int dir = (formSeg % 2) ? facing : -facing;
+            bool last = formSeg == lashes;
+            multiAttackId = cs.NewId();
+            float reach = (last ? 275.0f : 220.0f) * rngM;
+            float tall = (last ? 148.0f : 118.0f) * rngM;
+            Rectangle r = { dir > 0 ? pos.x - 20.0f : pos.x - reach + 20.0f,
+                            pos.y - tall * 0.5f, reach, tall };
+            AddHit(cs, fx, r, (last ? 28.0f : 13.0f) * dmgM,
+                   dir * (last ? 430.0f : 210.0f), -150, 0.055f,
+                   HitKind::Love, multiAttackId, -1);
+            Vector2 c = { pos.x + dir * (70.0f + 12.0f * formSeg), pos.y - 8.0f };
+            fx.SlashArc(c, (92.0f + formSeg * 7.0f) * rngM,
+                        dir > 0 ? -72.0f : 252.0f, dir > 0 ? 72.0f : 108.0f,
+                        last ? CORE : LC);
+            fx.Sparks(c, dir > 0 ? 180.0f : 0.0f, 70, last ? 8 : 4, CORE, 340, 2.3f);
+            if (last) {
+                fx.Ring(c, 10, 126.0f * rngM, 560, 7, LC);
+                fx.AddShake(0.24f);
+                fx.AddHitstop(0.04f);
+            }
+            PlaySfx(SFX_SLASH, last ? 0.58f : 0.38f, 1.25f + 0.05f * formSeg);
+        }
+        LoveFlourish(fx, pos, facing, 0.55f * flair, lv);
+        if (formSeg >= lashes && formTick <= 0) state = PState::Normal;
+        break;
+    }
+    // 3 - Catlove Shower: curved attacks that also protect through the flurry
+    case LF_CATLOVE_SHOWER: {
+        float dur = 0.78f + 0.04f * lv;
+        iframes = fmaxf(iframes, 0.08f);
+        vel.x *= 1.0f - Clampf(5.5f * dt, 0, 1);
+        vel.y = -40.0f + sinf(stateTimer * 20.0f) * 70.0f;
+        formTick -= dt;
+        if (formTick <= 0) {
+            formTick = 0.095f / spdM;
+            formSeg++;
+            multiAttackId = cs.NewId();
+            float R = (118.0f + 5.0f * formSeg) * rngM;
+            AddHit(cs, fx, { pos.x - R, pos.y - 92.0f * rngM, R * 2.0f, 176.0f * rngM },
+                   9.0f * dmgM, 0, -120, 0.045f, HitKind::Love, multiAttackId, -1);
+            float a = formSeg * 62.0f;
+            fx.SlashArc(pos, R, a, a + 145.0f, (formSeg % 2) ? LC : CORE);
+            fx.Ring(pos, R * 0.45f, R * 0.98f, 360, 4 + lv / 2, LC);
+            PlaySfx(SFX_SLASH, 0.32f, 1.4f);
+        }
+        LoveFlourish(fx, { pos.x + frnd(-44, 44), pos.y + frnd(-54, 28) }, facing, 0.48f * flair, lv);
+        if (stateTimer >= dur) {
+            if (maxed) {
+                float R = 168.0f * rngM;
+                AddHit(cs, fx, { pos.x - R, pos.y - 100.0f, R * 2.0f, 190.0f },
+                       26.0f * dmgM, 0, -260, 0.075f, HitKind::Love, cs.NewId(), -1);
+                fx.Ring(pos, 26, R, 620, 8, CORE);
+                fx.AddShake(0.22f);
+            }
+            state = PState::Normal;
+        }
+        break;
+    }
+    // 4 - Swaying Love, Wildclaw: forward dash with long chaotic slashes
+    case LF_SWAYING_WILDCLAW: {
+        int claws = maxed ? 6 : 5;
+        if (hasHunt) facing = huntX > pos.x ? 1 : -1;
+        vel.x = facing * (650.0f + 40.0f * lv) * spdM;
+        vel.y = -80.0f + sinf(stateTimer * 18.0f) * 110.0f;
+        formTick -= dt;
+        if (formTick <= 0 && formSeg < claws) {
+            formTick = 0.125f / spdM;
+            formSeg++;
+            multiAttackId = cs.NewId();
+            bool last = formSeg == claws;
+            float reach = (last ? 340.0f : 270.0f) * rngM;
+            float yOff = sinf(formSeg * 1.7f) * 32.0f;
+            Rectangle r = { facing > 0 ? pos.x - 18.0f : pos.x - reach + 18.0f,
+                            pos.y - 68.0f + yOff, reach, 134.0f };
+            AddHit(cs, fx, r, (last ? 34.0f : 16.0f) * dmgM,
+                   facing * (last ? 560.0f : 260.0f), last ? -320.0f : -170.0f,
+                   0.06f, HitKind::Love, multiAttackId, -1);
+            Vector2 c = { pos.x + facing * (92.0f + formSeg * 22.0f), pos.y + yOff * 0.35f };
+            float start = facing > 0 ? -82.0f + formSeg * 9.0f : 262.0f - formSeg * 9.0f;
+            float end = facing > 0 ? 72.0f - formSeg * 5.0f : 112.0f + formSeg * 5.0f;
+            fx.SlashArc(c, (104.0f + 10.0f * formSeg) * rngM, start, end, last ? CORE : LC);
+            LoveFlourish(fx, c, facing, last ? 1.0f * flair : 0.65f * flair, lv);
+            if (last) {
+                fx.Ring(c, 14, 155.0f * rngM, 620, 8, CORE);
+                fx.AddShake(0.34f);
+                fx.AddHitstop(0.055f);
+            }
+            PlaySfx(SFX_SLASH, last ? 0.64f : 0.42f, 1.18f - 0.04f * formSeg);
+        }
+        if (formSeg >= claws && formTick <= 0) { state = PState::Normal; vel.x = facing * 130.0f; }
+        break;
+    }
+    // 5 - Cat-Legged Winds of Love: acrobatic spinning whirlwind
+    case LF_CAT_LEGGED_WINDS: {
+        float dur = 0.84f + 0.05f * lv;
+        iframes = fmaxf(iframes, 0.08f);
+        vel.x = facing * 330.0f * spdM;
+        vel.y = -sinf(Clampf(stateTimer / dur, 0, 1) * PI) * 360.0f;
+        formTick -= dt;
+        if (formTick <= 0) {
+            formTick = 0.08f / spdM;
+            formSeg++;
+            multiAttackId = cs.NewId();
+            PlaySfx(SFX_SLASH, 0.34f, 1.3f + 0.04f * (formSeg % 4));
+        }
+        float R = (100.0f + 7.0f * lv) * rngM;
+        AddHit(cs, fx, { pos.x - R, pos.y - R, R * 2.0f, R * 2.0f },
+               10.5f * dmgM, facing * 130.0f, -220.0f, 0.04f,
+               HitKind::Love, multiAttackId, -1);
+        fx.SlashArc(pos, R, stateTimer * 1280.0f, stateTimer * 1280.0f + 215.0f, LC);
+        fx.Ring(pos, R * 0.58f, R * 1.05f, 380, 6, CORE);
+        LoveFlourish(fx, { pos.x + cosf(stateTimer * 18.0f) * R * 0.45f,
+                           pos.y + sinf(stateTimer * 18.0f) * R * 0.28f },
+                     facing, 0.52f * flair, lv);
+        if (stateTimer >= dur) {
+            if (maxed) {
+                AddHit(cs, fx, { pos.x - R * 1.28f, pos.y - R * 1.12f,
+                                 R * 2.56f, R * 2.12f },
+                       32.0f * dmgM, 0, -430.0f, 0.08f, HitKind::Love, cs.NewId(), -1);
+                fx.Ring(pos, 28, R * 1.62f, 690, 9, LC);
+                fx.AddShake(0.3f);
+            }
+            state = PState::Normal;
+        }
+        break;
+    }
+    // 6 - Final Form: high-speed aerial storm from every direction
+    case LF_RIPPING_KITTY_TEMPEST: {
+        int bursts = maxed ? 10 : 8;
+        float dur = (1.05f + 0.04f * lv) / spdM;
+        iframes = fmaxf(iframes, 0.08f);
+        formTick -= dt;
+        if (formTick <= 0 && formSeg < bursts) {
+            formTick = 0.105f / spdM;
+            formSeg++;
+            int dir = (formSeg % 2) ? facing : -facing;
+            if (hasHunt && formSeg % 3 == 1) dir = huntX > pos.x ? 1 : -1;
+            multiAttackId = cs.NewId();
+            vel.x = dir * (650.0f + 42.0f * lv) * spdM;
+            vel.y = (formSeg % 3 == 0) ? -360.0f : ((formSeg % 3 == 1) ? 150.0f : -120.0f);
+            float reach = (220.0f + 7.0f * formSeg) * rngM;
+            Rectangle r = { dir > 0 ? pos.x - 35.0f : pos.x - reach + 35.0f,
+                            pos.y - 92.0f, reach, 178.0f };
+            AddHit(cs, fx, r, (formSeg == bursts ? 30.0f : 15.0f) * dmgM,
+                   dir * 360.0f, -240.0f, 0.055f, HitKind::Love, multiAttackId, -1);
+            float spin = formSeg * 41.0f;
+            fx.SlashArc(pos, (128.0f + formSeg * 8.0f) * rngM,
+                        spin, spin + (dir > 0 ? 190.0f : -190.0f),
+                        (formSeg % 2) ? CORE : LC);
+            LoveFlourish(fx, { pos.x + dir * 70.0f, pos.y + frnd(-52, 24) },
+                         dir, 0.9f * flair, lv);
+            PlaySfx(SFX_SLASH, 0.5f, 1.28f - 0.035f * (formSeg % 5));
+        }
+        if (formSeg >= bursts && !didHitFrame) {
+            didHitFrame = true;
+            float R = (205.0f + 10.0f * lv) * rngM;
+            AddHit(cs, fx, { pos.x - R, pos.y - R * 0.82f, R * 2.0f, R * 1.64f },
+                   72.0f * dmgM, 0, -650.0f, 0.105f, HitKind::Love, cs.NewId(), -1);
+            AddHit(cs, fx, { pos.x, pos.y - R * 0.82f, R, R * 1.64f },
+                   0, 520.0f, -220.0f, 0.08f, HitKind::Love, cs.NewId(), -1);
+            AddHit(cs, fx, { pos.x - R, pos.y - R * 0.82f, R, R * 1.64f },
+                   0, -520.0f, -220.0f, 0.08f, HitKind::Love, cs.NewId(), -1);
+            fx.Ring(pos, 32, R, 760, 14, LC);
+            fx.Ring(pos, 18, R * 0.62f, 620, 7, CORE);
+            fx.Flash(C(255, 135, 205), 0.18f + 0.02f * lv);
+            fx.AddShake(0.78f);
+            fx.AddHitstop(0.11f);
+            PlaySfx(SFX_LOVE, 1.0f, 0.62f);
+        }
+        if (stateTimer >= dur || (didHitFrame && formTick <= -0.08f)) {
+            state = PState::Normal;
+            vel.x = facing * 120.0f;
+            vel.y = fminf(vel.y, 120.0f);
+        }
+        break;
+    }
+    default:
+        state = PState::Normal;
+        break;
+    }
+}
+
 void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
     UpdateTechs(dt, cs, fx);     // techniques outlive states, even death throes
 
@@ -1366,6 +1689,7 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
     for (int i = 0; i < WATER_FORM_COUNT; i++) waterCd[i] = fmaxf(waterCd[i] - dt, 0);
     for (int i = 0; i < FLAME_FORM_COUNT; i++) flameCd[i] = fmaxf(flameCd[i] - dt, 0);
     for (int i = 0; i < STONE_FORM_COUNT; i++) stoneCd[i] = fmaxf(stoneCd[i] - dt, 0);
+    for (int i = 0; i < LOVE_FORM_COUNT; i++) loveCd[i] = fmaxf(loveCd[i] - dt, 0);
     deadCalmT = fmaxf(deadCalmT - dt, 0);
     flameGuardT = fmaxf(flameGuardT - dt, 0);
     if (flameGuardT <= 0) flameGuardDurability = 0;
@@ -1447,22 +1771,15 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
                 // Stone Breathing: five heavy forms, each on its own number key
                 TryStartStoneForm(cs, fx);
             }
+            else if (equipped == STYLE_LOVE) {
+                // Love Breathing: six agile forms, each on its own number key
+                TryStartLoveForm(cs, fx);
+            }
             else if (styleP[STYLE_STONE] && cd[STYLE_STONE] <= 0) {
                 state = PState::Stone;
                 stateTimer = 0; didHitFrame = false;
                 vel.x = 0;
                 PlaySfx(SFX_WHOOSH, 0.5f, 0.7f);
-            }
-            else if (styleP[STYLE_LOVE] && cd[STYLE_LOVE] <= 0) {
-                state = PState::Love;
-                stateTimer = 0;
-                loveSeg = 0;
-                cd[STYLE_LOVE] = cfg::LOVE_CD * prog->CdMult(STYLE_LOVE);
-                multiAttackId = cs.NewId();
-                int segs = prog->Mastery(STYLE_LOVE) ? 5 : 3;
-                iframes = fmaxf(iframes, segs * LOVE_SEG_T + 0.1f);
-                if (hasHunt) facing = huntX > pos.x ? 1 : -1;
-                PlaySfx(SFX_LOVE, 0.85f);
             }
             else if (styleP[STYLE_SERPENT] && cd[STYLE_SERPENT] <= 0) {
                 state = PState::Serpent;
@@ -1644,30 +1961,9 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
             if (stateTimer >= STONE_TOTAL) state = PState::Normal;
             break;
         }
-        case PState::Love: {
-            stateTimer += dt;
-            int segs = prog->Mastery(STYLE_LOVE) ? 5 : 3;
-            if (stateTimer >= LOVE_SEG_T) {
-                stateTimer = 0;
-                loveSeg++;
-                if (loveSeg >= segs) {
-                    state = PState::Normal;
-                    vel.x = facing * 100.0f;
-                    break;
-                }
-                if (hasHunt) facing = huntX > pos.x ? 1 : -1;
-                else facing = -facing;                      // flourish
-                multiAttackId = cs.NewId();
-                vel.y = -110.0f;                            // flutter hop
-                PlaySfx(SFX_SLASH, 0.4f, 1.4f);
-            }
-            vel.x = facing * 880.0f * prog->ReachMult(STYLE_LOVE);
-            fx.LoveSparkle(pos, facing);
-            Rectangle r = { pos.x - 65 + facing * 38, pos.y - 36, 130, 72 };
-            AddHit(cs, fx, r, 10, facing * 120, -140, 0.03f,
-                   HitKind::Love, multiAttackId, STYLE_LOVE);
+        case PState::Love:
+            UpdateLoveForm(dt, cs, fx);
             break;
-        }
         case PState::Serpent: {
             stateTimer += dt;
             if (hasHunt) facing = huntX > pos.x ? 1 : -1;   // twisting pursuit
@@ -1769,6 +2065,7 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
     bool noGravity = (state == PState::Water || state == PState::WaterForm ||
                       state == PState::FlameForm ||
                       state == PState::Plunge ||
+                      state == PState::Love ||
                       state == PState::Serpent || state == PState::Mist);
     if (!noGravity) vel.y += cfg::GRAVITY * dt;
     if (state == PState::Love) vel.y = fminf(vel.y, 260.0f);
@@ -2041,7 +2338,27 @@ void Player::Draw() const {
                     break;
             }
             break;
-        case PState::Love:       ang = fmodf(gt * 1300.0f, 360.0f); spinBlade = true; break;
+        case PState::Love:
+            switch (loveForm) {
+                case LF_SHIVERS_FIRST_LOVE:
+                case LF_SWAYING_WILDCLAW:
+                    ang = -28.0f + sinf(gt * 45.0f) * 38.0f;
+                    break;
+                case LF_LOVE_PANGS:
+                    ang = sinf(gt * 70.0f) * 70.0f;
+                    break;
+                case LF_CATLOVE_SHOWER:
+                case LF_CAT_LEGGED_WINDS:
+                case LF_RIPPING_KITTY_TEMPEST:
+                    ang = fmodf(gt * 1450.0f, 360.0f);
+                    spinBlade = true;
+                    break;
+                default:
+                    ang = fmodf(gt * 1300.0f, 360.0f);
+                    spinBlade = true;
+                    break;
+            }
+            break;
         case PState::Serpent:    ang = 8.0f + sinf(gt * 46.0f) * 55.0f; break;
         case PState::Wind:
             if (stateTimer < WIND_WINDUP) ang = -95.0f;
@@ -2167,6 +2484,57 @@ void Player::Draw() const {
                 DrawLineEx({ pos.x - facing * 64.0f, pos.y + 10.0f },
                            { pos.x + facing * 110.0f, pos.y - 6.0f },
                            8.0f * scale, Fade(aura, 0.18f * alpha));
+                break;
+        }
+    }
+
+    if (state == PState::Love) {
+        int lv = prog ? prog->love.Level(loveForm) : 1;
+        float pulse = 0.5f + 0.5f * sinf(gt * 15.0f);
+        Color aura = LoveCol(lv);
+        Color core = LoveCore(lv);
+        float scale = 1.0f + 0.10f * (lv - 1);
+        switch (loveForm) {
+            case LF_SHIVERS_FIRST_LOVE:
+                DrawLineEx({ pos.x - facing * 72.0f, pos.y + 8.0f },
+                           { pos.x + facing * 130.0f, pos.y - 8.0f },
+                           9.0f * scale, Fade(aura, 0.22f * alpha));
+                break;
+            case LF_LOVE_PANGS:
+                DrawRing(pos, 74.0f * scale, 80.0f * scale, gt * 280.0f,
+                         gt * 280.0f + 260.0f, 48, Fade(aura, 0.24f * alpha));
+                DrawRing(pos, 116.0f * scale, 121.0f * scale, -gt * 240.0f,
+                         -gt * 240.0f + 220.0f, 48, Fade(core, 0.18f * alpha));
+                break;
+            case LF_CATLOVE_SHOWER:
+                DrawRing(pos, 62.0f * scale, 68.0f * scale, 0, 360, 48,
+                         Fade(core, 0.30f * alpha));
+                DrawCircleSector(pos, 116.0f * scale, gt * 150.0f,
+                                 gt * 150.0f + 170.0f, 36, Fade(aura, 0.18f * alpha));
+                break;
+            case LF_SWAYING_WILDCLAW:
+                DrawLineEx({ pos.x - facing * 56.0f, pos.y + 24.0f },
+                           { pos.x + facing * 230.0f * scale, pos.y - 46.0f },
+                           8.0f * scale, Fade(aura, 0.20f * alpha));
+                DrawLineEx({ pos.x - facing * 34.0f, pos.y - 22.0f },
+                           { pos.x + facing * 210.0f * scale, pos.y + 28.0f },
+                           5.0f * scale, Fade(core, 0.22f * alpha));
+                break;
+            case LF_CAT_LEGGED_WINDS:
+                DrawRing(pos, 48.0f + pulse * 18.0f, 55.0f + pulse * 18.0f,
+                         0, 360, 48, Fade(core, 0.32f * alpha));
+                DrawRing(pos, 100.0f * scale, 106.0f * scale, gt * 310.0f,
+                         gt * 310.0f + 280.0f, 54, Fade(aura, 0.25f * alpha));
+                break;
+            case LF_RIPPING_KITTY_TEMPEST:
+                DrawRing(pos, 118.0f * scale, 126.0f * scale, gt * 360.0f,
+                         gt * 360.0f + 310.0f, 64, Fade(aura, 0.27f * alpha));
+                DrawRing(pos, 70.0f + pulse * 28.0f, 78.0f + pulse * 28.0f,
+                         -gt * 290.0f, -gt * 290.0f + 250.0f, 56, Fade(core, 0.24f * alpha));
+                break;
+            default:
+                DrawCircleSector(pos, 92.0f * scale, -70.0f, 70.0f, 28,
+                                 Fade(aura, 0.18f * alpha));
                 break;
         }
     }

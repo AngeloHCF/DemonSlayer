@@ -6,7 +6,7 @@
 //   DOWN + J   : plunging strike (airborne)
 //   Number keys : equipped Breathing Style
 //                 Water uses 1-9, 0, - for forms; Flame uses 1-9.
-//                 Stone uses 1-5. Other styles use 1.
+//                 Stone uses 1-5. Love uses 1-6. Other styles use 1.
 //
 // All Breathing Styles scale with the Progression upgrade trees
 // (damage / cooldown / reach) and gain Mastery variants.
@@ -71,6 +71,8 @@ public:
     int   flameForm = -1;        // active Flame form while in PState::FlameForm
     float stoneCd[STONE_FORM_COUNT] = {}; // per-form cooldowns (Stone Breathing)
     int   stoneForm = -1;        // active Stone form while in PState::StoneForm
+    float loveCd[LOVE_FORM_COUNT] = {}; // per-form cooldowns (Love Breathing)
+    int   loveForm = -1;         // active Love form while in PState::Love
     float iframes = 0;
 
     // Eleventh Form: Dead Calm nullifies enemy attacks in a zone around the
@@ -115,6 +117,8 @@ private:
     void UpdateFlameForm(float dt, CombatSystem& cs, Effects& fx);
     bool TryStartStoneForm(CombatSystem& cs, Effects& fx);
     void UpdateStoneForm(float dt, CombatSystem& cs, Effects& fx);
+    bool TryStartLoveForm(CombatSystem& cs, Effects& fx);
+    void UpdateLoveForm(float dt, CombatSystem& cs, Effects& fx);
     int   FlameStyleLevel(int style) const;
     bool  FlameStyleMaxed(int style) const;
     float FlameBasicSpeedMult() const;
@@ -148,7 +152,6 @@ private:
     int   multiAttackId = -1;    // shared id for multi-frame attacks
     float waterTick = 0;
     int   waterPass = 0;         // mastery: returning flux
-    int   loveSeg = 0;
     float serpentTick = 0;
     float mistAmbushT = 0;       // next strike from the mist deals double
     int   formSeg = 0;           // segment counter for multi-hit Water forms

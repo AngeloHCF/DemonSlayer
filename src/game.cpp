@@ -19,7 +19,7 @@ static const StyleInfo STYLE_INFO[STYLE_COUNT] = {
     { "WATER",   "WTR", "1", { 80, 160, 255, 255 } },
     { "FLAME",   "FLM", "1-9", { 255, 130, 50, 255 } },
     { "STONE",   "STN", "1-5", { 185, 175, 160, 255 } },
-    { "LOVE",    "LOV", "1", { 255, 130, 195, 255 } },
+    { "LOVE",    "LOV", "1-6", { 255, 130, 195, 255 } },
     { "SERPENT", "SRP", "1", { 120, 220, 90, 255 } },
     { "WIND",    "WND", "1", { 200, 240, 220, 255 } },
     { "MIST",    "MST", "1", { 175, 185, 205, 255 } },
@@ -33,7 +33,7 @@ static const char* STYLE_DESC[STYLE_COUNT] = {
     "eleven forms - each its own ability, leveled independently",
     "nine forms - burst, guard, pursuit, and Rengoku finish",
     "five heavy forms - overwhelming strength, area control, and defense",
-    "healing dance of blades",
+    "six flexible forms - agile slashes, aerial storms, and mending hits",
     "venomous weaving flurry",
     "sweeping twin tornadoes",
     "vanish, blink, and ambush from the fog",
@@ -42,7 +42,7 @@ static const char* MASTERY_DESC[STYLE_COUNT] = {
     "CONSTANT FLUX - the dash flows back through the enemy line a second time",
     "FLAME MASTERY - level individual forms to make fire larger and brighter",
     "EARTH SPLITTER - the slam launches a quake racing along the ground",
-    "FIVE-STEP DANCE - five dashes, and every cut mends you twice as much",
+    "LOVE MASTERY - level individual forms to sharpen slashes and stronger mending",
     "TWIN FANGS - the weave ends in a venomous finishing bite",
     "TWIN CYCLONES - tornadoes tear away in both directions",
     "SEA OF CLOUDS - a lingering mist field that slows all demons inside",
@@ -96,6 +96,18 @@ static const StoneFormInfo STONE_FORMS[STONE_FORM_COUNT] = {
     { "Stone Skin",                       "planted defensive form with shield durability and deflection" },
     { "Volcanic Rock, Rapid Conquest",    "repeated advancing impacts that lock down crowds" },
     { "Arcs of Justice",                  "ultimate sweeping arcs with huge area and finishing impact" },
+};
+
+static const char* LOVE_FORM_KEYLABEL[LOVE_FORM_COUNT] =
+    { "1", "2", "3", "4", "5", "6" };
+struct LoveFormInfo { const char* name; const char* role; };
+static const LoveFormInfo LOVE_FORMS[LOVE_FORM_COUNT] = {
+    { "Shivers of First Love",             "fast sweeping slash that crosses space in a heartbeat" },
+    { "Love Pangs",                        "rapid whip-like slashes covering a broad front" },
+    { "Catlove Shower",                    "curved defensive flurry that protects while it cuts" },
+    { "Swaying Love, Wildclaw",            "dashing long-range barrage with chaotic clawing arcs" },
+    { "Cat-Legged Winds of Love",          "acrobatic spin that wraps the user in a cutting whirlwind" },
+    { "Ripping Kitty Tempest of Love",     "final aerial tempest: high-speed slashes from every side" },
 };
 
 struct FlameFightingStyleInfo {
@@ -731,6 +743,12 @@ void Game::ResolveCombat() {
         }
     }
 
+    auto MendLoveHit = [&]() {
+        int f = player.loveForm;
+        float mend = 1.6f * prog.love.MendMult(f) + (prog.love.Maxed(f) ? 0.55f : 0.0f);
+        player.hp = fminf(player.hp + mend, player.maxHp);
+    };
+
     for (auto& hb : combat.Boxes()) {
         if (hb.life <= 0) continue;      // nullified by a guard or expired
         if (hb.team == Team::Player) {
@@ -742,10 +760,7 @@ void Game::ResolveCombat() {
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.damage >= 20 ? 0.045f : 0.02f);  // hit pause = weight
                     PlaySfx(SFX_HIT, 0.55f);
-                    if (hb.kind == HitKind::Love) {                    // love mends
-                        float mend = prog.Mastery(STYLE_LOVE) ? 4.0f : 2.0f;
-                        player.hp = fminf(player.hp + mend, player.maxHp);
-                    }
+                    if (hb.kind == HitKind::Love) MendLoveHit();       // love mends
                 }
                 if (!e.alive && hb.kind == HitKind::Giyu && giyu.mastery.xp < 999) {
                     giyu.mastery.xp++;                                 // his blade remembers
@@ -797,10 +812,7 @@ void Game::ResolveCombat() {
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.kind == HitKind::Fire ? 0.04f : 0.015f);
                     PlaySfx(SFX_HIT, 0.6f, 0.85f);
-                    if (hb.kind == HitKind::Love) {
-                        float mend = prog.Mastery(STYLE_LOVE) ? 4.0f : 2.0f;
-                        player.hp = fminf(player.hp + mend, player.maxHp);
-                    }
+                    if (hb.kind == HitKind::Love) MendLoveHit();
                 }
             }
             if (akaza.Alive() && !akaza.hitMem.Seen(hb.attackId) &&
@@ -828,10 +840,7 @@ void Game::ResolveCombat() {
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.kind == HitKind::Fire ? 0.04f : 0.015f);
                     PlaySfx(SFX_HIT, 0.6f, 1.0f);
-                    if (hb.kind == HitKind::Love) {
-                        float mend = prog.Mastery(STYLE_LOVE) ? 4.0f : 2.0f;
-                        player.hp = fminf(player.hp + mend, player.maxHp);
-                    }
+                    if (hb.kind == HitKind::Love) MendLoveHit();
                 }
             }
             UpperMoon* moonsArr[2] = { &douma, &kokushibo };
@@ -861,10 +870,7 @@ void Game::ResolveCombat() {
                 if (hb.damage > 0) {
                     fx.AddHitstop(hb.kind == HitKind::Fire ? 0.04f : 0.015f);
                     PlaySfx(SFX_HIT, 0.6f, 0.95f);
-                    if (hb.kind == HitKind::Love) {
-                        float mend = prog.Mastery(STYLE_LOVE) ? 4.0f : 2.0f;
-                        player.hp = fminf(player.hp + mend, player.maxHp);
-                    }
+                    if (hb.kind == HitKind::Love) MendLoveHit();
                 }
             }
         } else {
@@ -1231,8 +1237,10 @@ void Game::CycleEquippedStyle(int dir) {
     for (int i = 0; i < WATER_FORM_COUNT; i++) player.waterCd[i] = 0;
     for (int i = 0; i < FLAME_FORM_COUNT; i++) player.flameCd[i] = 0;
     for (int i = 0; i < STONE_FORM_COUNT; i++) player.stoneCd[i] = 0;
+    for (int i = 0; i < LOVE_FORM_COUNT; i++) player.loveCd[i] = 0;
     if (devUnlockAll) prog.UnlockAll();
-    selRow = (s == STYLE_WATER || s == STYLE_FIRE || s == STYLE_STONE) ? 0 : s;
+    selRow = (s == STYLE_WATER || s == STYLE_FIRE || s == STYLE_STONE ||
+              s == STYLE_LOVE) ? 0 : s;
     selCol = 0;
     flameShopTab = 0;
     player.RefreshFlameRunStats();
@@ -1316,6 +1324,23 @@ void Game::UpdateUpgradeMenu() {
             if (prog.stone.CanUpgrade(f, prog.points)) {
                 prog.points -= prog.stone.Cost(f);
                 prog.stone.level[f]++;
+                PlaySfx(SFX_UPGRADE, 0.9f);
+            } else {
+                PlaySfx(SFX_PICKUP, 0.35f, 0.5f);
+            }
+        }
+        return;
+    }
+    if (player.equipped == STYLE_LOVE) {
+        if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S))
+            selRow = (selRow + 1) % LOVE_FORM_COUNT;
+        if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W))
+            selRow = (selRow + LOVE_FORM_COUNT - 1) % LOVE_FORM_COUNT;
+        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_J)) {
+            int f = selRow % LOVE_FORM_COUNT;
+            if (prog.love.CanUpgrade(f, prog.points)) {
+                prog.points -= prog.love.Cost(f);
+                prog.love.level[f]++;
                 PlaySfx(SFX_UPGRADE, 0.9f);
             } else {
                 PlaySfx(SFX_PICKUP, 0.35f, 0.5f);
@@ -1417,7 +1442,7 @@ void Game::Update(float rawDt) {
             }
             if (IsKeyPressed(KEY_TAB)) {
                 selRow = (player.equipped == STYLE_WATER || player.equipped == STYLE_FIRE ||
-                          player.equipped == STYLE_STONE)
+                          player.equipped == STYLE_STONE || player.equipped == STYLE_LOVE)
                          ? 0 : player.equipped;
                 if (devUnlockAll) prog.UnlockAll();
                 state = GState::Upgrade;
@@ -1731,6 +1756,14 @@ void Game::DrawUI() const {
                                  C(225, 215, 180));
             DrawText("STONE SKIN", 436, 58, 13, C(205, 198, 178));
         }
+    } else if (player.equipped == STYLE_LOVE) {
+        Color lc = STYLE_INFO[STYLE_LOVE].col;
+        for (int i = 0; i < LOVE_FORM_COUNT; i++) {
+            float cdMax = LoveFormBaseCd(i) * prog.love.CdMult(i);
+            DrawFormIcon(20 + i * 44, 56, LOVE_FORM_KEYLABEL[i], player.loveCd[i], cdMax,
+                         prog.love.Level(i), lc, prog.love.Maxed(i));
+        }
+        DrawText("LOVE BREATHING - 6 FORMS", 20, 104, 14, Fade(lc, 0.9f));
     } else {
         int es = player.equipped;
         const StyleUpgrades& u = prog.up[es];
@@ -2168,9 +2201,10 @@ void Game::DrawSettings() const {
     }
 
     ky += 12;
-    DrawText("Water, Flame, and Stone use numbered forms; other styles fire on 1 -", kx, ky, 15,
+    DrawText("Water, Flame, Stone, and Love use numbered forms;", kx, ky, 15,
              C(160, 156, 172));
-    DrawText("you only ever carry one into a run.", kx, ky + 20, 15, C(160, 156, 172));
+    DrawText("other styles fire on 1. You only carry one style into a run.", kx, ky + 20, 15,
+             C(160, 156, 172));
 
     CText("UP / DOWN - select      LEFT / RIGHT - adjust      ESC - back", 666, 18,
           C(175, 170, 188));
@@ -2266,6 +2300,52 @@ void Game::DrawUpgradeMenu() const {
         CText(STONE_FORMS[cur].role, fy, 17, C(216, 211, 226));
         CText(TextFormat("LEVEL  %d / 5   -   heavier damage, range, shield durability, debris & shockwaves",
               prog.stone.Level(cur)), fy + 24, 14, Fade(sc, 0.9f));
+        return;
+    }
+
+    if (player.equipped == STYLE_LOVE) {
+        Color lc = STYLE_INFO[STYLE_LOVE].col;
+        int cur = selRow % LOVE_FORM_COUNT;
+        CText("LOVE  BREATHING  -  FORM  MASTERY", 34, 34, C(235, 225, 235));
+        DrawText(TextFormat("POINTS  %d", prog.points), cfg::SCREEN_W - 230, 36, 28,
+                 C(255, 215, 120));
+        CText(devUnlockAll
+              ? "UP / DOWN - choose form      Q / E - swap dev shop style      TAB - return"
+              : "UP / DOWN - choose form      ENTER - level up      TAB - return to battle",
+              78, 15, C(170, 165, 185));
+
+        const int y0 = 126, rh = 66;
+        for (int i = 0; i < LOVE_FORM_COUNT; i++) {
+            int y = y0 + i * rh;
+            bool sel = (cur == i);
+            int lv = prog.love.Level(i);
+            bool mx = prog.love.Maxed(i);
+            Rectangle row = { 58, (float)y, (float)(cfg::SCREEN_W - 116), (float)(rh - 10) };
+            DrawRectangleRounded(row, 0.14f, 4, sel ? C(54, 34, 48) : C(30, 22, 30));
+            if (sel) DrawRectangleLinesEx(row, 2, C(255, 215, 120));
+
+            DrawText(TextFormat("%d", i + 1), (int)row.x + 18, y + 10, 24, Fade(lc, 0.95f));
+            DrawText(LOVE_FORMS[i].name, (int)row.x + 58, y + 8, 22,
+                     mx ? C(255, 225, 150) : C(228, 223, 235));
+            DrawText(LOVE_FORMS[i].role, (int)row.x + 58, y + 34, 15, C(214, 188, 205));
+            DrawText(TextFormat("KEY %s", LOVE_FORM_KEYLABEL[i]), 610, y + 15, 14,
+                     C(170, 142, 158));
+            for (int p = 0; p < 5; p++)
+                DrawRectangle(752 + p * 22, y + 16, 17, 15,
+                              p < lv ? (mx ? C(255, 215, 120) : lc) : C(56, 42, 52));
+            if (mx)
+                DrawText("MAX", cfg::SCREEN_W - 118, y + 14, 18, C(255, 215, 120));
+            else {
+                bool afford = prog.points >= prog.love.Cost(i);
+                DrawText(TextFormat("%d pt", prog.love.Cost(i)), cfg::SCREEN_W - 118, y + 16, 16,
+                         afford ? C(220, 205, 220) : C(125, 110, 130));
+            }
+        }
+
+        int fy = y0 + LOVE_FORM_COUNT * rh + 8;
+        CText(LOVE_FORMS[cur].role, fy, 17, C(216, 211, 226));
+        CText(TextFormat("LEVEL  %d / 5   -   faster ribbons, wider arcs, lower cooldowns & stronger mending",
+              prog.love.Level(cur)), fy + 24, 14, Fade(lc, 0.9f));
         return;
     }
 
@@ -2480,9 +2560,9 @@ void Game::DrawOverlays() const {
 
         CText("A / D - move    W / SPACE - jump    SHIFT - crouch    J - combo    UP+J launcher    DOWN+J plunge", 300, 15, C(210, 220, 235));
         CText("WATER - eleven flowing forms         FLAME - nine cinematic forms", 342, 15, C(120, 190, 255));
-        CText("STONE - five crushing forms           LOVE - healing dance", 368, 15, C(255, 150, 205));
+        CText("STONE - five crushing forms           LOVE - six flexible forms", 368, 15, C(255, 150, 205));
         CText("SERPENT - venomous weaving flurry     WIND - sweeping tornadoes", 394, 15, C(140, 220, 120));
-        CText("MIST - vanish, blink, ambush from the fog   (Water/Flame/Stone use numbered forms)", 420, 15, C(185, 195, 215));
+        CText("MIST - vanish, blink, ambush from the fog   (Water/Flame/Stone/Love use numbered forms)", 420, 15, C(185, 195, 215));
         CText("G - summon GIYU TOMIOKA, the Water Hashira. if he falls, he is gone for the run", 446, 15, C(120, 190, 255));
         CText("B - summon SHINOBU KOCHO, the Insect Hashira. poison, triage, and wisteria", 472, 15, C(190, 150, 255));
         CText("R - summon KYOJURO RENGOKU, the Flame Hashira. burst damage and openings", 498, 15, C(255, 150, 55));

@@ -28,7 +28,7 @@
 | **K** / 1 | **Water** | Flowing multi-hit dash, evasive, slows enemies (3.5s) |
 | **1-9** | **Flame** | Nine Flame Breathing forms with individual cooldowns, hitboxes, mastery levels, and passive Fighting Styles |
 | **1-5** | **Stone** | Five heavy Stone Breathing forms built for strength, defense, and area control |
-| **O** / 4 | **Love** | Agile homing dash-dance that mends your wounds (6s) |
+| **1-6** | **Love** | Six Love Breathing forms with flexible sword arcs, aerial pressure, and mending hits |
 | **U** / 5 | **Serpent** | Weaving venomous flurry — poison ticks after the cuts (5s) |
 | **H** / 6 | **Wind** | 360° launching sweep that unleashes a traveling tornado (9s) |
 | **M** / 7 | **Mist** | Blink + brief invisibility; enemies lose you; next strike deals **2x** (7s) |
@@ -105,7 +105,18 @@ If a Hashira falls during an encounter, that summon slot stays committed until t
 
 ## Progression
 
-Clearing a wave grants **+2 upgrade points** (and a heal). Press **TAB** any time in battle to open the upgrade menu. Water, Flame, and Stone use form shops where each form levels 1-5 independently; Flame also has a second **Fighting Styles** tab for passive loadouts. Other styles use a shared tree:
+Clearing a wave grants **+2 upgrade points** (and a heal). Press **TAB** any time in battle to open the upgrade menu. Water, Flame, Stone, and Love use form shops where each form levels 1-5 independently; Flame also has a second **Fighting Styles** tab for passive loadouts. Other styles use a shared tree:
+
+### Love Breathing Forms
+
+Love uses numbered forms 1-6. Every form has its own cooldown, hitboxes, visual effects, upgrade level, and mending strength.
+
+- **First Form: Shivers of First Love** - a fast, sweeping slash that strikes with tremendous speed.
+- **Second Form: Love Pangs** - multiple whip-like slashes unleashed rapidly across a wide area.
+- **Third Form: Catlove Shower** - curved attacks that strike enemies while protecting through the flurry.
+- **Fifth Form: Swaying Love, Wildclaw** - a forward dash with a chaotic barrage of long-range slashes.
+- **Sixth Form: Cat-Legged Winds of Love** - an acrobatic spinning whirlwind of flexible sword strikes.
+- **Final Form: Ripping Kitty Tempest of Love** - a high-speed aerial storm of slashes from every direction.
 
 ### Stone Breathing Forms
 
@@ -131,7 +142,7 @@ Flame players can unlock and upgrade five passive Fighting Styles. Only one Figh
 - **FLOW** — −18% cooldown per level (3 levels, 1 pt each)
 - **REACH** — +20% range, duration & technique speed per level (3 levels, 1 pt each)
 - **MASTERY** (2 pts) — a unique stronger/alternate move per style:
-  Love gains five dashes + double lifesteal · Serpent ends in a venomous twin-fang bite · Wind releases twin cyclones · Mist leaves a lingering slowing cloud
+  Serpent ends in a venomous twin-fang bite · Wind releases twin cyclones · Mist leaves a lingering slowing cloud
 
 Flame's Fourth Form, **Blooming Flame Undulation**, is the defensive form built to burn away Akaza, Kokushibo, and Muzan attacks.
 
