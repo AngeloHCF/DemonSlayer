@@ -26,8 +26,8 @@
 | Key | Style | Feel |
 |---|---|---|
 | **K** / 1 | **Water** | Flowing multi-hit dash, evasive, slows enemies (3.5s) |
-| **1-9** | **Flame** | Nine Flame Breathing forms with individual cooldowns, hitboxes, and mastery levels |
-| **I** / 3 | **Stone** | Slow crushing slam; breaks brute armor & Muzan's guard (10s) |
+| **1-9** | **Flame** | Nine Flame Breathing forms with individual cooldowns, hitboxes, mastery levels, and passive Fighting Styles |
+| **1-5** | **Stone** | Five heavy Stone Breathing forms built for strength, defense, and area control |
 | **O** / 4 | **Love** | Agile homing dash-dance that mends your wounds (6s) |
 | **U** / 5 | **Serpent** | Weaving venomous flurry — poison ticks after the cuts (5s) |
 | **H** / 6 | **Wind** | 360° launching sweep that unleashes a traveling tornado (9s) |
@@ -105,13 +105,33 @@ If a Hashira falls during an encounter, that summon slot stays committed until t
 
 ## Progression
 
-Clearing a wave grants **+2 upgrade points** (and a heal). Press **TAB** any time in battle to open the upgrade menu. Water and Flame use form shops where each form levels 1-5 independently; other styles use a shared tree:
+Clearing a wave grants **+2 upgrade points** (and a heal). Press **TAB** any time in battle to open the upgrade menu. Water, Flame, and Stone use form shops where each form levels 1-5 independently; Flame also has a second **Fighting Styles** tab for passive loadouts. Other styles use a shared tree:
+
+### Stone Breathing Forms
+
+Stone uses numbered forms 1-5. Every form has its own cooldown, hitboxes, visual effects, and upgrade level.
+
+- **First Form: Serpentinite Bipolar** - chained front-and-back pressure for midrange control.
+- **Second Form: Upper Smash** - a slow, crushing launcher that punishes brutes and bosses.
+- **Third Form: Stone Skin** - the primary defensive form. The player plants their stance, gains shield durability, shatters projectiles, and blocks or reduces incoming damage while the shield holds.
+- **Fourth Form: Volcanic Rock, Rapid Conquest** - repeated advancing impacts for crowd lockdown.
+- **Fifth Form: Arcs of Justice** - a slow ultimate sequence of sweeping arcs with a massive finishing shockwave.
+
+### Flame Fighting Styles
+
+Flame players can unlock and upgrade five passive Fighting Styles. Only one Fighting Style can be equipped at a time; upgrading a style also equips it. Each style has 5 levels, costs 1/2/3/4/5 points to raise, and gains a unique specialization bonus at Level 5.
+
+- **Offensive Style** - higher attack and Flame damage, faster combo speed, and critical strike chance. Level 5: **Blazing Criticals** hit harder and happen more often.
+- **Defensive Style** - lower incoming damage, stronger Blooming Flame Undulation guard durability, and reduced knockback. Level 5: **Phoenix Guard** rekindles the flame guard once instead of breaking immediately.
+- **Swift Style** - faster movement, longer Flame dash travel, faster attacks/forms, and shorter recovery. Level 5: **Afterimage Step** adds extra safety during Flame form startups.
+- **Endurance Style** - higher max health, higher Flame stamina, faster stamina recovery, and stronger crowd-control/chill resistance. Level 5: **Unyielding** consumes stamina to survive a lethal hit at 1 HP.
+- **Mastery Style** - lower Flame form cooldowns, cheaper stamina costs, and slight form speed/range/damage improvements. Level 5: **Form Chain** shaves cooldown time from the other Flame forms whenever one is cast.
 
 - **POWER** — +30% damage per level (3 levels, 1 pt each)
 - **FLOW** — −18% cooldown per level (3 levels, 1 pt each)
 - **REACH** — +20% range, duration & technique speed per level (3 levels, 1 pt each)
 - **MASTERY** (2 pts) — a unique stronger/alternate move per style:
-  Stone launches a ground-splitting quake · Love gains five dashes + double lifesteal · Serpent ends in a venomous twin-fang bite · Wind releases twin cyclones · Mist leaves a lingering slowing cloud
+  Love gains five dashes + double lifesteal · Serpent ends in a venomous twin-fang bite · Wind releases twin cyclones · Mist leaves a lingering slowing cloud
 
 Flame's Fourth Form, **Blooming Flame Undulation**, is the defensive form built to burn away Akaza, Kokushibo, and Muzan attacks.
 
@@ -163,7 +183,7 @@ c++ src/*.cpp -o demonslayer -std=c++17 -O2 $(pkg-config --libs --cflags raylib)
 ```
 
 ## Dev flags
-`./demonslayer --demo` skips the title screen; `--akaza`, `--douma`, `--koku`, and `--boss` jump straight to Akaza / Douma / Kokushibo / Muzan. Add `--unlock-all` to start with every style track, Water form, Flame form, and mastery unlocked. In the upgrade shop, **Q / E** swaps the dev shop style. During a run, press **F8** to toggle developer invincibility.
+`./demonslayer --demo` skips the title screen; `--akaza`, `--douma`, `--koku`, and `--boss` jump straight to Akaza / Douma / Kokushibo / Muzan. Add `--unlock-all` to start with every style track, Water form, Flame form, Stone form, Flame Fighting Style, and mastery unlocked. In the upgrade shop, **Q / E** swaps the dev shop style. During a run, press **F8** to toggle developer invincibility.
 
 ## Code layout
 ```

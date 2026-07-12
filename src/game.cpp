@@ -18,7 +18,7 @@ struct StyleInfo { const char* name; const char* shortName; const char* key; Col
 static const StyleInfo STYLE_INFO[STYLE_COUNT] = {
     { "WATER",   "WTR", "1", { 80, 160, 255, 255 } },
     { "FLAME",   "FLM", "1-9", { 255, 130, 50, 255 } },
-    { "STONE",   "STN", "1", { 185, 175, 160, 255 } },
+    { "STONE",   "STN", "1-5", { 185, 175, 160, 255 } },
     { "LOVE",    "LOV", "1", { 255, 130, 195, 255 } },
     { "SERPENT", "SRP", "1", { 120, 220, 90, 255 } },
     { "WIND",    "WND", "1", { 200, 240, 220, 255 } },
@@ -32,7 +32,7 @@ static const float STYLE_CD_BASE[STYLE_COUNT] = {
 static const char* STYLE_DESC[STYLE_COUNT] = {
     "eleven forms - each its own ability, leveled independently",
     "nine forms - burst, guard, pursuit, and Rengoku finish",
-    "guard-crushing ground slam",
+    "five heavy forms - overwhelming strength, area control, and defense",
     "healing dance of blades",
     "venomous weaving flurry",
     "sweeping twin tornadoes",
@@ -85,6 +85,54 @@ static const FlameFormInfo FLAME_FORMS[FLAME_FORM_COUNT] = {
     { "Inferno Wheel",                  "original rolling circle - mobile crowd control" },
     { "Crimson Lotus Crest",            "original ranged crest - sends fire forward and leaves burning ground" },
     { "Rengoku",                        "ultimate charge - cinematic, destructive finishing burst" },
+};
+
+static const char* STONE_FORM_KEYLABEL[STONE_FORM_COUNT] =
+    { "1", "2", "3", "4", "5" };
+struct StoneFormInfo { const char* name; const char* role; };
+static const StoneFormInfo STONE_FORMS[STONE_FORM_COUNT] = {
+    { "Serpentinite Bipolar",             "front-and-back chain pressure for midrange control" },
+    { "Upper Smash",                      "slow crushing launcher that punishes brutes and bosses" },
+    { "Stone Skin",                       "planted defensive form with shield durability and deflection" },
+    { "Volcanic Rock, Rapid Conquest",    "repeated advancing impacts that lock down crowds" },
+    { "Arcs of Justice",                  "ultimate sweeping arcs with huge area and finishing impact" },
+};
+
+struct FlameFightingStyleInfo {
+    const char* name;
+    const char* shortName;
+    const char* role;
+    const char* perLevel;
+    const char* maxBonus;
+    Color col;
+};
+
+static const FlameFightingStyleInfo FLAME_FIGHTING_STYLES[FLAME_FS_COUNT] = {
+    { "Offensive Style", "OFF",
+      "burst pressure through stronger hits, faster combos, and critical strikes",
+      "damage, combo speed, and crit chance rise each level",
+      "Level 5: Blazing Criticals hit harder and trigger more often",
+      { 255, 105, 65, 255 } },
+    { "Defensive Style", "DEF",
+      "hold ground with reduced damage, sturdier flame guard, and lower knockback",
+      "defense, guard durability, damage reduction, and knockback control rise each level",
+      "Level 5: Phoenix Guard rekindles once instead of breaking immediately",
+      { 255, 185, 90, 255 } },
+    { "Swift Style", "SWF",
+      "win through positioning: faster footwork, longer flame dashes, quicker attacks",
+      "movement, dash distance, attack speed, and recovery improve each level",
+      "Level 5: Afterimage Step adds extra safety during Flame form startups",
+      { 110, 225, 235, 255 } },
+    { "Endurance Style", "END",
+      "survive long fights with more health, stamina, and control resistance",
+      "max health, max stamina, and crowd-control resistance rise each level",
+      "Level 5: Unyielding consumes stamina to survive a lethal hit at 1 HP",
+      { 130, 220, 125, 255 } },
+    { "Mastery Style", "MAS",
+      "specialise in form cycling: lower cooldowns, cheaper forms, broader flame scaling",
+      "cooldowns, stamina efficiency, form speed, range, and form damage improve each level",
+      "Level 5: Form Chain shaves time from the other Flame forms whenever you cast one",
+      { 210, 165, 255, 255 } },
 };
 
 void Game::Init() {
@@ -488,13 +536,12 @@ void Game::StartRun() {
     prog.Reset();
     if (devUnlockAll) prog.UnlockAll();   // --unlock-all: max every style and form
     player.prog = &prog;
-    player.Reset({ cfg::SCREEN_W * 0.5f, cfg::GROUND_Y - 60 });
     // equip the chosen Breathing Style for the whole run (fall back if it is locked)
     if (!unlocks.IsUnlocked(selectedStyle)) selectedStyle = unlocks.FirstUnlocked();
     player.equipped = selectedStyle;
+    player.Reset({ cfg::SCREEN_W * 0.5f, cfg::GROUND_Y - 60 });
     player.invincible = devInvincible;
-    player.maxHp = 200;
-    player.hp = 200;
+    player.RefreshFlameRunStats();
     enemies.clear();
     pickups.clear();
     boss.Reset();
@@ -626,6 +673,35 @@ void Game::ResolveCombat() {
             }
         }
     }
+    // Third Form: Stone Skin - planted defense that shatters projectiles and
+    // hostile hitboxes while its durability holds.
+    if (player.StoneGuardActive()) {
+        Rectangle z = player.StoneGuardZone();
+        int crushed = 0;
+        for (auto& hb : combat.Boxes()) {
+            if (hb.team == Team::Enemy && hb.life > 0 &&
+                CheckCollisionRecs(hb.rect, z)) {
+                hb.life = 0;
+                crushed += (hb.kind == HitKind::BossProjectile || hb.kind == HitKind::BossAoe) ? 7 : 3;
+                Vector2 c = { hb.rect.x + hb.rect.width * 0.5f,
+                              hb.rect.y + hb.rect.height * 0.5f };
+                fx.Sparks(c, -90, 360, 12, C(245, 240, 218), 520, 3.0f);
+                fx.QuakeTrail({ c.x, cfg::GROUND_Y });
+            }
+        }
+        crushed += boss.NullifyCrescentsInRect(z) * 5;
+        crushed += boss.NullifyRingsInRect(z) * 13;
+        crushed += akaza.NullifyOrbsInRect(z) * 5;
+        crushed += douma.NullifyShardsInRect(z) * 5;
+        crushed += kokushibo.NullifyShardsInRect(z) * 5;
+        if (crushed > 0) {
+            player.AbsorbStoneGuard(crushed, fx);
+            fx.Ring({ z.x + z.width * 0.5f, z.y + z.height * 0.5f },
+                    20, 140, 500, 8, C(188, 178, 158));
+            fx.AddShake(0.10f + 0.01f * fminf((float)crushed, 18.0f));
+            PlaySfx(SFX_STONE, 0.42f, 0.82f);
+        }
+    }
     // Fourth Form: Blooming Flame Undulation - a rotating flame guard that
     // consumes Demon Art hitboxes and special projectiles before impact.
     if (player.FlameGuardActive()) {
@@ -647,6 +723,7 @@ void Game::ResolveCombat() {
         burned += douma.NullifyShardsInRect(z);
         burned += kokushibo.NullifyShardsInRect(z);
         if (burned > 0) {
+            player.AbsorbFlameGuard(burned, fx);
             fx.Ring({ z.x + z.width * 0.5f, z.y + z.height * 0.5f },
                     18, 118, 520, 7, C(255, 150, 55));
             fx.AddShake(0.08f);
@@ -1153,9 +1230,12 @@ void Game::CycleEquippedStyle(int dir) {
     for (int i = 0; i < STYLE_COUNT; i++) player.cd[i] = 0;
     for (int i = 0; i < WATER_FORM_COUNT; i++) player.waterCd[i] = 0;
     for (int i = 0; i < FLAME_FORM_COUNT; i++) player.flameCd[i] = 0;
+    for (int i = 0; i < STONE_FORM_COUNT; i++) player.stoneCd[i] = 0;
     if (devUnlockAll) prog.UnlockAll();
-    selRow = (s == STYLE_WATER || s == STYLE_FIRE) ? 0 : s;
+    selRow = (s == STYLE_WATER || s == STYLE_FIRE || s == STYLE_STONE) ? 0 : s;
     selCol = 0;
+    flameShopTab = 0;
+    player.RefreshFlameRunStats();
     fx.Text({ player.pos.x, player.pos.y - 104 }, STYLE_INFO[s].col, 0.95f,
             "%s BREATHING", STYLE_INFO[s].name);
     PlaySfx(SFX_UPGRADE, 0.7f);
@@ -1226,19 +1306,67 @@ void Game::UpdateUpgradeMenu() {
         }
         return;
     }
-    if (player.equipped == STYLE_FIRE) {
+    if (player.equipped == STYLE_STONE) {
         if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S))
-            selRow = (selRow + 1) % FLAME_FORM_COUNT;
+            selRow = (selRow + 1) % STONE_FORM_COUNT;
         if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W))
-            selRow = (selRow + FLAME_FORM_COUNT - 1) % FLAME_FORM_COUNT;
+            selRow = (selRow + STONE_FORM_COUNT - 1) % STONE_FORM_COUNT;
         if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_J)) {
-            int f = selRow % FLAME_FORM_COUNT;
-            if (prog.flame.CanUpgrade(f, prog.points)) {
-                prog.points -= prog.flame.Cost(f);
-                prog.flame.level[f]++;
+            int f = selRow % STONE_FORM_COUNT;
+            if (prog.stone.CanUpgrade(f, prog.points)) {
+                prog.points -= prog.stone.Cost(f);
+                prog.stone.level[f]++;
                 PlaySfx(SFX_UPGRADE, 0.9f);
             } else {
                 PlaySfx(SFX_PICKUP, 0.35f, 0.5f);
+            }
+        }
+        return;
+    }
+    if (player.equipped == STYLE_FIRE) {
+        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) {
+            flameShopTab = (flameShopTab + 1) % 2;
+            selRow = 0;
+            PlaySfx(SFX_PICKUP, 0.28f, 1.15f);
+        }
+        if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) {
+            flameShopTab = (flameShopTab + 1) % 2;
+            selRow = 0;
+            PlaySfx(SFX_PICKUP, 0.28f, 0.9f);
+        }
+        int rows = flameShopTab == 0 ? (int)FLAME_FORM_COUNT : (int)FLAME_FS_COUNT;
+        if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S))
+            selRow = (selRow + 1) % rows;
+        if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W))
+            selRow = (selRow + rows - 1) % rows;
+        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_J)) {
+            if (flameShopTab == 0) {
+                int f = selRow % FLAME_FORM_COUNT;
+                if (prog.flame.CanUpgrade(f, prog.points)) {
+                    prog.points -= prog.flame.Cost(f);
+                    prog.flame.level[f]++;
+                    PlaySfx(SFX_UPGRADE, 0.9f);
+                } else {
+                    PlaySfx(SFX_PICKUP, 0.35f, 0.5f);
+                }
+            } else {
+                int fs = selRow % FLAME_FS_COUNT;
+                if (prog.flameStyle.Upgrade(fs, prog.points)) {
+                    player.RefreshFlameRunStats();
+                    fx.Text({ player.pos.x, player.pos.y - 96 },
+                            FLAME_FIGHTING_STYLES[fs].col, 0.95f,
+                            "%s LV %d", FLAME_FIGHTING_STYLES[fs].name,
+                            prog.flameStyle.Level(fs));
+                    PlaySfx(SFX_UPGRADE, 0.9f);
+                } else if (prog.flameStyle.Equip(fs)) {
+                    player.RefreshFlameRunStats();
+                    fx.Text({ player.pos.x, player.pos.y - 96 },
+                            FLAME_FIGHTING_STYLES[fs].col, 0.95f,
+                            "%s EQUIPPED", FLAME_FIGHTING_STYLES[fs].name);
+                    PlaySfx(SFX_UPGRADE, 0.65f, 1.2f);
+                } else {
+                    PlaySfx(SFX_PICKUP, 0.35f, 0.5f);
+                }
             }
         }
         return;
@@ -1288,7 +1416,8 @@ void Game::Update(float rawDt) {
                 return;
             }
             if (IsKeyPressed(KEY_TAB)) {
-                selRow = (player.equipped == STYLE_WATER || player.equipped == STYLE_FIRE)
+                selRow = (player.equipped == STYLE_WATER || player.equipped == STYLE_FIRE ||
+                          player.equipped == STYLE_STONE)
                          ? 0 : player.equipped;
                 if (devUnlockAll) prog.UnlockAll();
                 state = GState::Upgrade;
@@ -1562,11 +1691,46 @@ void Game::DrawUI() const {
     } else if (player.equipped == STYLE_FIRE) {
         Color fc = STYLE_INFO[STYLE_FIRE].col;
         for (int i = 0; i < FLAME_FORM_COUNT; i++) {
-            float cdMax = FlameFormBaseCd(i) * prog.flame.CdMult(i);
+            float cdMax = FlameFormBaseCd(i) * prog.flame.CdMult(i) * prog.flameStyle.CooldownMult();
             DrawFormIcon(20 + i * 44, 56, FLAME_FORM_KEYLABEL[i], player.flameCd[i], cdMax,
                          prog.flame.Level(i), fc, prog.flame.Maxed(i));
         }
         DrawText("FLAME BREATHING - 9 FORMS", 20, 104, 14, Fade(fc, 0.9f));
+        int fs = prog.flameStyle.equipped;
+        if (prog.flameStyle.Unlocked(fs)) {
+            const FlameFightingStyleInfo& fsi = FLAME_FIGHTING_STYLES[fs];
+            DrawText(TextFormat("%s STYLE  LV %d", fsi.shortName, prog.flameStyle.Level(fs)),
+                     430, 104, 14, Fade(fsi.col, 0.95f));
+        } else {
+            DrawText("NO FIGHTING STYLE", 430, 104, 14, C(130, 120, 130));
+        }
+        float sf = player.maxStamina > 0 ? Clampf(player.stamina / player.maxStamina, 0, 1) : 0;
+        DrawRectangleRounded({ 430, 122, 178, 10 }, 0.35f, 4, C(28, 22, 26));
+        DrawRectangleRounded({ 431, 123, fmaxf(176 * sf, 4), 8 }, 0.35f, 4,
+                             sf > 0.35f ? C(255, 170, 75) : C(210, 95, 70));
+        DrawText(TextFormat("STAM %.0f/%.0f", player.stamina, player.maxStamina),
+                 616, 119, 12, C(190, 180, 175));
+        if (player.FlameGuardActive()) {
+            float gf = player.FlameGuardRatio();
+            DrawRectangleRounded({ 430, 138, 178, 8 }, 0.35f, 4, C(28, 22, 26));
+            DrawRectangleRounded({ 431, 139, fmaxf(176 * gf, 4), 6 }, 0.35f, 4,
+                                 C(255, 215, 120));
+        }
+    } else if (player.equipped == STYLE_STONE) {
+        Color sc = STYLE_INFO[STYLE_STONE].col;
+        for (int i = 0; i < STONE_FORM_COUNT; i++) {
+            float cdMax = StoneFormBaseCd(i) * prog.stone.CdMult(i);
+            DrawFormIcon(20 + i * 44, 56, STONE_FORM_KEYLABEL[i], player.stoneCd[i], cdMax,
+                         prog.stone.Level(i), sc, prog.stone.Maxed(i));
+        }
+        DrawText("STONE BREATHING - 5 FORMS", 20, 104, 14, Fade(sc, 0.9f));
+        if (player.StoneGuardActive()) {
+            float gf = player.StoneGuardRatio();
+            DrawRectangleRounded({ 250, 62, 178, 10 }, 0.35f, 4, C(28, 24, 22));
+            DrawRectangleRounded({ 251, 63, fmaxf(176 * gf, 4), 8 }, 0.35f, 4,
+                                 C(225, 215, 180));
+            DrawText("STONE SKIN", 436, 58, 13, C(205, 198, 178));
+        }
     } else {
         int es = player.equipped;
         const StyleUpgrades& u = prog.up[es];
@@ -2004,7 +2168,7 @@ void Game::DrawSettings() const {
     }
 
     ky += 12;
-    DrawText("Water and Flame use numbered forms; other styles fire on 1 -", kx, ky, 15,
+    DrawText("Water, Flame, and Stone use numbered forms; other styles fire on 1 -", kx, ky, 15,
              C(160, 156, 172));
     DrawText("you only ever carry one into a run.", kx, ky + 20, 15, C(160, 156, 172));
 
@@ -2059,10 +2223,10 @@ void Game::DrawUpgradeMenu() const {
         return;
     }
 
-    if (player.equipped == STYLE_FIRE) {
-        Color fc = STYLE_INFO[STYLE_FIRE].col;
-        int cur = selRow % FLAME_FORM_COUNT;
-        CText("FLAME  BREATHING  -  FORM  MASTERY", 34, 34, C(235, 225, 235));
+    if (player.equipped == STYLE_STONE) {
+        Color sc = STYLE_INFO[STYLE_STONE].col;
+        int cur = selRow % STONE_FORM_COUNT;
+        CText("STONE  BREATHING  -  FORM  MASTERY", 34, 34, C(235, 225, 235));
         DrawText(TextFormat("POINTS  %d", prog.points), cfg::SCREEN_W - 230, 36, 28,
                  C(255, 215, 120));
         CText(devUnlockAll
@@ -2070,36 +2234,140 @@ void Game::DrawUpgradeMenu() const {
               : "UP / DOWN - choose form      ENTER - level up      TAB - return to battle",
               78, 15, C(170, 165, 185));
 
-        const int y0 = 122, rh = 50;
-        for (int i = 0; i < FLAME_FORM_COUNT; i++) {
+        const int y0 = 138, rh = 78;
+        for (int i = 0; i < STONE_FORM_COUNT; i++) {
             int y = y0 + i * rh;
             bool sel = (cur == i);
-            int lv = prog.flame.Level(i);
-            bool mx = prog.flame.Maxed(i);
-            Rectangle row = { 40, (float)y, (float)(cfg::SCREEN_W - 80), (float)(rh - 8) };
-            DrawRectangleRounded(row, 0.14f, 4, sel ? C(50, 36, 34) : C(30, 22, 24));
+            int lv = prog.stone.Level(i);
+            bool mx = prog.stone.Maxed(i);
+            Rectangle row = { 58, (float)y, (float)(cfg::SCREEN_W - 116), (float)(rh - 12) };
+            DrawRectangleRounded(row, 0.14f, 4, sel ? C(46, 40, 36) : C(28, 25, 24));
             if (sel) DrawRectangleLinesEx(row, 2, C(255, 215, 120));
 
-            DrawText(TextFormat("%2d", i + 1), 56, y + 9, 22, Fade(fc, 0.95f));
-            DrawText(FLAME_FORMS[i].name, 100, y + 11, 20, mx ? C(255, 225, 150) : C(228, 223, 235));
-            DrawText(TextFormat("KEY %s", FLAME_FORM_KEYLABEL[i]), 610, y + 14, 14,
-                     C(150, 150, 165));
+            DrawText(TextFormat("%d", i + 1), (int)row.x + 18, y + 12, 24, Fade(sc, 0.95f));
+            DrawText(STONE_FORMS[i].name, (int)row.x + 58, y + 10, 22,
+                     mx ? C(255, 225, 150) : C(228, 223, 235));
+            DrawText(STONE_FORMS[i].role, (int)row.x + 58, y + 40, 15, C(198, 192, 184));
+            DrawText(TextFormat("KEY %s", STONE_FORM_KEYLABEL[i]), 610, y + 16, 14,
+                     C(150, 145, 138));
             for (int p = 0; p < 5; p++)
-                DrawRectangle(752 + p * 22, y + 13, 17, 15,
-                              p < lv ? (mx ? C(255, 215, 120) : fc) : C(52, 42, 42));
+                DrawRectangle(752 + p * 22, y + 17, 17, 15,
+                              p < lv ? (mx ? C(255, 215, 120) : sc) : C(52, 48, 44));
             if (mx)
-                DrawText("MAX", cfg::SCREEN_W - 118, y + 11, 18, C(255, 215, 120));
+                DrawText("MAX", cfg::SCREEN_W - 118, y + 16, 18, C(255, 215, 120));
             else {
-                bool afford = prog.points >= prog.flame.Cost(i);
-                DrawText(TextFormat("%d pt", prog.flame.Cost(i)), cfg::SCREEN_W - 118, y + 13, 16,
+                bool afford = prog.points >= prog.stone.Cost(i);
+                DrawText(TextFormat("%d pt", prog.stone.Cost(i)), cfg::SCREEN_W - 118, y + 18, 16,
                          afford ? C(210, 205, 225) : C(120, 115, 135));
             }
         }
 
-        int fy = y0 + FLAME_FORM_COUNT * rh + 8;
-        CText(FLAME_FORMS[cur].role, fy, 17, C(216, 211, 226));
-        CText(TextFormat("LEVEL  %d / 5   -   flames grow larger, brighter, faster & more destructive",
-              prog.flame.Level(cur)), fy + 24, 14, Fade(fc, 0.9f));
+        int fy = y0 + STONE_FORM_COUNT * rh + 4;
+        CText(STONE_FORMS[cur].role, fy, 17, C(216, 211, 226));
+        CText(TextFormat("LEVEL  %d / 5   -   heavier damage, range, shield durability, debris & shockwaves",
+              prog.stone.Level(cur)), fy + 24, 14, Fade(sc, 0.9f));
+        return;
+    }
+
+    if (player.equipped == STYLE_FIRE) {
+        Color fc = STYLE_INFO[STYLE_FIRE].col;
+        int cur = flameShopTab == 0 ? selRow % FLAME_FORM_COUNT : selRow % FLAME_FS_COUNT;
+        CText(flameShopTab == 0 ? "FLAME  BREATHING  -  FORM  MASTERY"
+                                 : "FLAME  BREATHING  -  FIGHTING  STYLES",
+              34, 34, C(235, 225, 235));
+        DrawText(TextFormat("POINTS  %d", prog.points), cfg::SCREEN_W - 230, 36, 28,
+                 C(255, 215, 120));
+        CText(devUnlockAll
+              ? "LEFT / RIGHT - forms or styles      UP / DOWN - choose      Q / E - swap dev shop style      TAB - return"
+              : "LEFT / RIGHT - forms or styles      UP / DOWN - choose      ENTER - level/equip      TAB - return",
+              78, 15, C(170, 165, 185));
+
+        Rectangle formTab = { 390, 102, 210, 34 };
+        Rectangle styleTab = { 612, 102, 250, 34 };
+        DrawRectangleRounded(formTab, 0.18f, 5, flameShopTab == 0 ? C(58, 38, 34) : C(30, 22, 24));
+        DrawRectangleRounded(styleTab, 0.18f, 5, flameShopTab == 1 ? C(58, 38, 34) : C(30, 22, 24));
+        DrawText("FORM MASTERY", (int)formTab.x + 24, (int)formTab.y + 8, 17,
+                 flameShopTab == 0 ? C(255, 225, 150) : C(150, 140, 150));
+        DrawText("FIGHTING STYLES", (int)styleTab.x + 24, (int)styleTab.y + 8, 17,
+                 flameShopTab == 1 ? C(255, 225, 150) : C(150, 140, 150));
+
+        if (flameShopTab == 0) {
+            const int y0 = 150, rh = 47;
+            for (int i = 0; i < FLAME_FORM_COUNT; i++) {
+                int y = y0 + i * rh;
+                bool sel = (cur == i);
+                int lv = prog.flame.Level(i);
+                bool mx = prog.flame.Maxed(i);
+                Rectangle row = { 40, (float)y, (float)(cfg::SCREEN_W - 80), (float)(rh - 8) };
+                DrawRectangleRounded(row, 0.14f, 4, sel ? C(50, 36, 34) : C(30, 22, 24));
+                if (sel) DrawRectangleLinesEx(row, 2, C(255, 215, 120));
+
+                DrawText(TextFormat("%2d", i + 1), 56, y + 9, 22, Fade(fc, 0.95f));
+                DrawText(FLAME_FORMS[i].name, 100, y + 11, 20, mx ? C(255, 225, 150) : C(228, 223, 235));
+                DrawText(TextFormat("KEY %s", FLAME_FORM_KEYLABEL[i]), 610, y + 14, 14,
+                         C(150, 150, 165));
+                for (int p = 0; p < 5; p++)
+                    DrawRectangle(752 + p * 22, y + 13, 17, 15,
+                                  p < lv ? (mx ? C(255, 215, 120) : fc) : C(52, 42, 42));
+                if (mx)
+                    DrawText("MAX", cfg::SCREEN_W - 118, y + 11, 18, C(255, 215, 120));
+                else {
+                    bool afford = prog.points >= prog.flame.Cost(i);
+                    DrawText(TextFormat("%d pt", prog.flame.Cost(i)), cfg::SCREEN_W - 118, y + 13, 16,
+                             afford ? C(210, 205, 225) : C(120, 115, 135));
+                }
+            }
+
+            int fy = y0 + FLAME_FORM_COUNT * rh + 8;
+            CText(FLAME_FORMS[cur].role, fy, 17, C(216, 211, 226));
+            CText(TextFormat("LEVEL  %d / 5   -   flames grow larger, brighter, faster & more destructive",
+                  prog.flame.Level(cur)), fy + 24, 14, Fade(fc, 0.9f));
+        } else {
+            const int y0 = 156, rh = 76;
+            for (int i = 0; i < FLAME_FS_COUNT; i++) {
+                int y = y0 + i * rh;
+                const FlameFightingStyleInfo& fs = FLAME_FIGHTING_STYLES[i];
+                bool sel = (cur == i);
+                bool eq = prog.flameStyle.Equipped(i) && prog.flameStyle.Unlocked(i);
+                int lv = prog.flameStyle.Level(i);
+                bool mx = prog.flameStyle.Maxed(i);
+                Rectangle row = { 58, (float)y, (float)(cfg::SCREEN_W - 116), (float)(rh - 12) };
+                DrawRectangleRounded(row, 0.14f, 4, sel ? C(52, 38, 34) : C(30, 22, 24));
+                if (eq)
+                    DrawRectangleRounded({ row.x + 10, row.y + 10, 12, row.height - 20 },
+                                         0.35f, 4, fs.col);
+                else
+                    DrawRectangleRounded({ row.x + 10, row.y + 10, 12, row.height - 20 },
+                                         0.35f, 4, C(70, 58, 54));
+                if (sel) DrawRectangleLinesEx(row, 2, C(255, 215, 120));
+
+                DrawText(fs.name, (int)row.x + 34, y + 10, 22,
+                         lv > 0 ? C(232, 226, 236) : C(150, 140, 140));
+                DrawText(fs.role, (int)row.x + 34, y + 38, 15,
+                         lv > 0 ? C(202, 198, 212) : C(130, 122, 128));
+                for (int p = 0; p < 5; p++)
+                    DrawRectangle((int)row.x + 615 + p * 24, y + 16, 18, 16,
+                                  p < lv ? (mx ? C(255, 215, 120) : fs.col) : C(54, 44, 44));
+
+                const char* tag = eq ? "EQUIPPED" : (!prog.flameStyle.Unlocked(i) ? "LOCKED" : "READY");
+                Color tagC = eq ? C(255, 215, 120)
+                           : prog.flameStyle.Unlocked(i) ? Fade(fs.col, 0.95f) : C(150, 112, 112);
+                DrawText(tag, cfg::SCREEN_W - 250, y + 11, 17, tagC);
+                if (mx)
+                    DrawText("MAX", cfg::SCREEN_W - 132, y + 37, 17, C(255, 215, 120));
+                else {
+                    bool afford = prog.points >= prog.flameStyle.Cost(i);
+                    DrawText(TextFormat("%d pt", prog.flameStyle.Cost(i)),
+                             cfg::SCREEN_W - 132, y + 37, 17,
+                             afford ? C(210, 205, 225) : C(120, 110, 120));
+                }
+            }
+
+            int fy = y0 + FLAME_FS_COUNT * rh + 10;
+            const FlameFightingStyleInfo& fs = FLAME_FIGHTING_STYLES[cur];
+            CText(fs.perLevel, fy, 17, C(216, 211, 226));
+            CText(fs.maxBonus, fy + 24, 15, Fade(fs.col, 0.95f));
+        }
         return;
     }
 
@@ -2212,9 +2480,9 @@ void Game::DrawOverlays() const {
 
         CText("A / D - move    W / SPACE - jump    SHIFT - crouch    J - combo    UP+J launcher    DOWN+J plunge", 300, 15, C(210, 220, 235));
         CText("WATER - eleven flowing forms         FLAME - nine cinematic forms", 342, 15, C(120, 190, 255));
-        CText("STONE - guard-crushing slam           LOVE - healing dance", 368, 15, C(255, 150, 205));
+        CText("STONE - five crushing forms           LOVE - healing dance", 368, 15, C(255, 150, 205));
         CText("SERPENT - venomous weaving flurry     WIND - sweeping tornadoes", 394, 15, C(140, 220, 120));
-        CText("MIST - vanish, blink, ambush from the fog   (Water/Flame use numbered forms)", 420, 15, C(185, 195, 215));
+        CText("MIST - vanish, blink, ambush from the fog   (Water/Flame/Stone use numbered forms)", 420, 15, C(185, 195, 215));
         CText("G - summon GIYU TOMIOKA, the Water Hashira. if he falls, he is gone for the run", 446, 15, C(120, 190, 255));
         CText("B - summon SHINOBU KOCHO, the Insect Hashira. poison, triage, and wisteria", 472, 15, C(190, 150, 255));
         CText("R - summon KYOJURO RENGOKU, the Flame Hashira. burst damage and openings", 498, 15, C(255, 150, 55));

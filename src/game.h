@@ -93,6 +93,7 @@ private:
           gyomeiCommitted = false, tengenCommitted = false, sanemiCommitted = false;
 
     int   selRow = 0, selCol = 0;   // upgrade menu cursor
+    int   flameShopTab = 0;         // 0 form mastery, 1 passive Fighting Styles
     int   pauseSel = 0;             // escape-menu cursor (0 resume, 1 settings, 2 quit)
     int   settingsSel = 0;          // settings-menu cursor
     GState settingsFrom = GState::Title;  // where to return when leaving settings

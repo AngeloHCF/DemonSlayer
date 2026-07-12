@@ -6,7 +6,7 @@
 //   DOWN + J   : plunging strike (airborne)
 //   Number keys : equipped Breathing Style
 //                 Water uses 1-9, 0, - for forms; Flame uses 1-9.
-//                 Other styles use 1.
+//                 Stone uses 1-5. Other styles use 1.
 //
 // All Breathing Styles scale with the Progression upgrade trees
 // (damage / cooldown / reach) and gain Mastery variants.
@@ -20,7 +20,7 @@ class Effects;
 
 enum class PState {
     Normal, Attack, UpSlash, Plunge,
-    Water, WaterForm, FlameForm, FireWindup, FireRecover, Stone, Love,
+    Water, WaterForm, FlameForm, StoneForm, FireWindup, FireRecover, Stone, Love,
     Serpent, Wind, Mist,
     Hurt, Dead
 };
@@ -62,12 +62,15 @@ public:
     Vector2 pos{}, vel{};        // pos = center of body
     int facing = 1;
     float hp = 0, maxHp = 0;
+    float stamina = 0, maxStamina = 0;
     float cd[STYLE_COUNT] = {};  // per-style cooldown timers
     int   equipped = STYLE_WATER; // the one Breathing Style carried into this run
     float waterCd[WATER_FORM_COUNT] = {}; // per-form cooldowns (Water Breathing)
     int   waterForm = -1;        // active Water form while in PState::WaterForm
     float flameCd[FLAME_FORM_COUNT] = {}; // per-form cooldowns (Flame Breathing)
     int   flameForm = -1;        // active Flame form while in PState::FlameForm
+    float stoneCd[STONE_FORM_COUNT] = {}; // per-form cooldowns (Stone Breathing)
+    int   stoneForm = -1;        // active Stone form while in PState::StoneForm
     float iframes = 0;
 
     // Eleventh Form: Dead Calm nullifies enemy attacks in a zone around the
@@ -76,10 +79,15 @@ public:
     Rectangle DeadCalmZone() const {
         return { pos.x - 130, pos.y - 120, 260, 200 };
     }
-    bool  FlameGuardActive() const { return flameGuardT > 0; }
-    Rectangle FlameGuardZone() const {
-        return { pos.x - 145, pos.y - 135, 290, 220 };
-    }
+    bool  FlameGuardActive() const { return flameGuardT > 0 && flameGuardDurability > 0; }
+    Rectangle FlameGuardZone() const;
+    bool  AbsorbFlameGuard(int pressure, Effects& fx);
+    float FlameGuardRatio() const;
+    void  RefreshFlameRunStats();
+    bool  StoneGuardActive() const { return stoneGuardT > 0 && stoneGuardDurability > 0; }
+    Rectangle StoneGuardZone() const;
+    bool  AbsorbStoneGuard(int pressure, Effects& fx);
+    float StoneGuardRatio() const;
     HitMemory hitMem;            // enemy attack ids that already connected
     PState state = PState::Normal;
     bool onGround = false;
@@ -105,6 +113,26 @@ private:
     void UpdateWaterForm(float dt, CombatSystem& cs, Effects& fx);
     bool TryStartFlameForm(CombatSystem& cs, Effects& fx);
     void UpdateFlameForm(float dt, CombatSystem& cs, Effects& fx);
+    bool TryStartStoneForm(CombatSystem& cs, Effects& fx);
+    void UpdateStoneForm(float dt, CombatSystem& cs, Effects& fx);
+    int   FlameStyleLevel(int style) const;
+    bool  FlameStyleMaxed(int style) const;
+    float FlameBasicSpeedMult() const;
+    float FlameMoveSpeedMult() const;
+    float FlameDashMult() const;
+    float FlameFormSpeedMult() const;
+    float FlameFormRangeMult() const;
+    float FlameCooldownMult() const;
+    float FlameGaugeCostMult() const;
+    float FlameDamageTakenMult() const;
+    float FlameKnockbackTakenMult() const;
+    float FlameCrowdControlMult() const;
+    float FlameMaxHealthMult() const;
+    float FlameMaxStaminaMult() const;
+    float FlameStaminaCost(int form) const;
+    float FlameStaminaRegen() const;
+    void  StartFlameGuard(float duration, float durability);
+    void  StartStoneGuard(float duration, float durability);
     // central hitbox spawner: applies style damage upgrades + mist ambush
     void AddHit(CombatSystem& cs, Effects& fx, Rectangle r, float dmg,
                 float kbx, float kby, float life, HitKind kind, int id, int style);
@@ -127,6 +155,13 @@ private:
     float formTick = 0;          // re-arm timer for multi-hit Water forms
     float deadCalmT = 0;         // Dead Calm nullification window remaining
     float flameGuardT = 0;       // Fourth Form defensive nullification window
+    float flameGuardDurability = 0;
+    float flameGuardDurabilityMax = 0;
+    bool  flameGuardRekindled = false;
+    float stoneGuardT = 0;
+    float stoneGuardDurability = 0;
+    float stoneGuardDurabilityMax = 0;
+    bool  stoneGuardReinforced = false;
     float hurtLen = 0.28f;       // current hitstun duration
     float hurtFlash = 0;
     float runPhase = 0;

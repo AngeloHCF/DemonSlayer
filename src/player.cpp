@@ -65,14 +65,208 @@ static void FlameBurstLine(Effects& fx, Vector2 p, int facing, float len, float 
     }
 }
 
+static Color StoneCol(int lv) {
+    return lv >= 5 ? C(235, 226, 196) : (lv >= 3 ? C(188, 178, 158) : C(150, 140, 128));
+}
+
+static Color StoneCore(int lv) {
+    return lv >= 4 ? C(245, 240, 218) : C(204, 198, 184);
+}
+
+static void StoneBurst(Effects& fx, Vector2 p, float power, int lv) {
+    fx.StoneSlam({ p.x, cfg::GROUND_Y });
+    fx.Sparks(p, -90, 140, (int)(8 + power * (7 + lv)), StoneCore(lv), 440 * power, 3.1f * power);
+    fx.Ring({ p.x, cfg::GROUND_Y - 8 }, 12, 115 * power, 540, 8 + lv, StoneCol(lv));
+    if (lv >= 4) fx.Ring({ p.x, cfg::GROUND_Y - 18 }, 20, 175 * power, 610, 6, StoneCore(lv));
+}
+
+static void StoneChainTrail(Effects& fx, Vector2 p, int facing, int lv) {
+    fx.Sparks(p, facing > 0 ? 180.0f : 0.0f, 52, 3 + lv / 2, StoneCore(lv), 290 + 38 * lv, 2.2f);
+    if (GetRandomValue(0, 2) == 0) fx.Dust({ p.x + frnd(-18, 18), cfg::GROUND_Y });
+}
+
+static constexpr float RUN_BASE_HP = 200.0f;
+static constexpr float BASE_STAMINA = 100.0f;
+
+int Player::FlameStyleLevel(int style) const {
+    if (!prog || equipped != STYLE_FIRE || !prog->flameStyle.Equipped(style)) return 0;
+    return prog->flameStyle.Level(style);
+}
+
+bool Player::FlameStyleMaxed(int style) const {
+    return FlameStyleLevel(style) >= 5;
+}
+
+float Player::FlameBasicSpeedMult() const {
+    return (prog && equipped == STYLE_FIRE) ? prog->flameStyle.BasicSpeedMult() : 1.0f;
+}
+
+float Player::FlameMoveSpeedMult() const {
+    return (prog && equipped == STYLE_FIRE) ? prog->flameStyle.MoveSpeedMult() : 1.0f;
+}
+
+float Player::FlameDashMult() const {
+    return (prog && equipped == STYLE_FIRE) ? prog->flameStyle.DashDistanceMult() : 1.0f;
+}
+
+float Player::FlameFormSpeedMult() const {
+    return (prog && equipped == STYLE_FIRE) ? prog->flameStyle.FlameSpeedMult() : 1.0f;
+}
+
+float Player::FlameFormRangeMult() const {
+    return (prog && equipped == STYLE_FIRE) ? prog->flameStyle.FormRangeMult() : 1.0f;
+}
+
+float Player::FlameCooldownMult() const {
+    return (prog && equipped == STYLE_FIRE) ? prog->flameStyle.CooldownMult() : 1.0f;
+}
+
+float Player::FlameGaugeCostMult() const {
+    return (prog && equipped == STYLE_FIRE) ? prog->flameStyle.GaugeCostMult() : 1.0f;
+}
+
+float Player::FlameDamageTakenMult() const {
+    return (prog && equipped == STYLE_FIRE) ? prog->flameStyle.DamageTakenMult() : 1.0f;
+}
+
+float Player::FlameKnockbackTakenMult() const {
+    return (prog && equipped == STYLE_FIRE) ? prog->flameStyle.KnockbackTakenMult() : 1.0f;
+}
+
+float Player::FlameCrowdControlMult() const {
+    return (prog && equipped == STYLE_FIRE) ? prog->flameStyle.CrowdControlMult() : 1.0f;
+}
+
+float Player::FlameMaxHealthMult() const {
+    return (prog && equipped == STYLE_FIRE) ? prog->flameStyle.MaxHealthMult() : 1.0f;
+}
+
+float Player::FlameMaxStaminaMult() const {
+    return (prog && equipped == STYLE_FIRE) ? prog->flameStyle.MaxStaminaMult() : 1.0f;
+}
+
+float Player::FlameStaminaCost(int form) const {
+    static const float cost[FLAME_FORM_COUNT] = {
+        14.0f, 16.0f, 24.0f, 24.0f, 26.0f, 20.0f, 24.0f, 26.0f, 40.0f
+    };
+    float base = (form >= 0 && form < FLAME_FORM_COUNT) ? cost[form] : 20.0f;
+    return base * FlameGaugeCostMult();
+}
+
+float Player::FlameStaminaRegen() const {
+    float regen = 24.0f;
+    if (FlameStyleLevel(FLAME_FS_ENDURANCE) > 0) regen += 1.5f * FlameStyleLevel(FLAME_FS_ENDURANCE);
+    if (FlameStyleLevel(FLAME_FS_MASTERY) > 0) regen += 1.0f * FlameStyleLevel(FLAME_FS_MASTERY);
+    return regen;
+}
+
+void Player::RefreshFlameRunStats() {
+    float oldHpMax = maxHp > 0 ? maxHp : RUN_BASE_HP;
+    float oldStMax = maxStamina > 0 ? maxStamina : BASE_STAMINA;
+    maxHp = RUN_BASE_HP * FlameMaxHealthMult();
+    maxStamina = BASE_STAMINA * FlameMaxStaminaMult();
+    if (hp <= 0) hp = maxHp;
+    else hp = fminf(maxHp, hp + fmaxf(maxHp - oldHpMax, 0.0f));
+    stamina = fminf(maxStamina, stamina + fmaxf(maxStamina - oldStMax, 0.0f));
+}
+
+void Player::StartFlameGuard(float duration, float durability) {
+    flameGuardT = duration;
+    flameGuardDurabilityMax = durability;
+    flameGuardDurability = flameGuardDurabilityMax;
+    flameGuardRekindled = false;
+}
+
+Rectangle Player::FlameGuardZone() const {
+    float m = (prog && equipped == STYLE_FIRE) ? prog->flameStyle.BarrierRadiusMult() : 1.0f;
+    return { pos.x - 145.0f * m, pos.y - 135.0f * m, 290.0f * m, 220.0f * m };
+}
+
+float Player::FlameGuardRatio() const {
+    return flameGuardDurabilityMax > 0 ? Clampf(flameGuardDurability / flameGuardDurabilityMax, 0, 1) : 0;
+}
+
+bool Player::AbsorbFlameGuard(int pressure, Effects& fx) {
+    if (!FlameGuardActive() || pressure <= 0) return false;
+    flameGuardDurability -= pressure * 3.5f;
+    if (flameGuardDurability > 0) return true;
+
+    if (FlameStyleMaxed(FLAME_FS_DEFENSIVE) && !flameGuardRekindled) {
+        flameGuardRekindled = true;
+        flameGuardDurability = flameGuardDurabilityMax * 0.38f;
+        flameGuardT = fmaxf(flameGuardT, 0.42f);
+        iframes = fmaxf(iframes, 0.42f);
+        fx.Text({ pos.x, pos.y - h - 18 }, C(255, 220, 120), 0.95f, "PHOENIX GUARD");
+        fx.Ring(pos, 24, 146, 620, 9, C(255, 180, 80));
+        fx.FireExplosion(pos);
+        PlaySfx(SFX_FIRE, 0.7f, 0.85f);
+        return true;
+    }
+
+    flameGuardDurability = 0;
+    flameGuardT = 0;
+    fx.Text({ pos.x, pos.y - h - 12 }, C(255, 150, 55), 0.9f, "flame guard breaks");
+    return false;
+}
+
+void Player::StartStoneGuard(float duration, float durability) {
+    stoneGuardT = duration;
+    stoneGuardDurabilityMax = durability;
+    stoneGuardDurability = stoneGuardDurabilityMax;
+    stoneGuardReinforced = false;
+}
+
+Rectangle Player::StoneGuardZone() const {
+    int lv = (prog && equipped == STYLE_STONE) ? prog->stone.Level(SF_STONE_SKIN) : 1;
+    float m = 1.0f + 0.08f * (lv - 1);
+    return { pos.x - 170.0f * m, pos.y - 145.0f * m, 340.0f * m, 250.0f * m };
+}
+
+float Player::StoneGuardRatio() const {
+    return stoneGuardDurabilityMax > 0 ? Clampf(stoneGuardDurability / stoneGuardDurabilityMax, 0, 1) : 0;
+}
+
+bool Player::AbsorbStoneGuard(int pressure, Effects& fx) {
+    if (!StoneGuardActive() || pressure <= 0) return false;
+    int lv = prog ? prog->stone.Level(SF_STONE_SKIN) : 1;
+    stoneGuardDurability -= pressure * 4.0f;
+    fx.Sparks({ pos.x + facing * 42.0f, pos.y - 18.0f },
+              facing > 0 ? 180.0f : 0.0f, 120, 8 + lv, StoneCore(lv), 520, 3.0f);
+    fx.Ring({ pos.x + facing * 42.0f, pos.y - 18.0f }, 10, 88 + lv * 10.0f, 420, 6, StoneCol(lv));
+    fx.AddShake(0.12f + 0.02f * lv);
+
+    if (stoneGuardDurability > 0) return true;
+
+    if (prog && prog->stone.Maxed(SF_STONE_SKIN) && !stoneGuardReinforced) {
+        stoneGuardReinforced = true;
+        stoneGuardDurability = stoneGuardDurabilityMax * 0.28f;
+        stoneGuardT = fmaxf(stoneGuardT, 0.45f);
+        fx.Text({ pos.x, pos.y - h - 16 }, StoneCore(lv), 0.95f, "DIAMOND STANCE");
+        StoneBurst(fx, { pos.x, cfg::GROUND_Y - 4 }, 1.25f, lv);
+        PlaySfx(SFX_STONE, 0.78f, 0.62f);
+        return true;
+    }
+
+    stoneGuardDurability = 0;
+    stoneGuardT = 0;
+    fx.Text({ pos.x, pos.y - h - 12 }, StoneCol(lv), 0.9f, "stone skin breaks");
+    fx.AddShake(0.38f);
+    return false;
+}
+
 void Player::Reset(Vector2 spawn) {
     pos = spawn; vel = {0, 0};
     facing = 1;
     maxHp = cfg::P_MAX_HP; hp = maxHp;
+    maxStamina = BASE_STAMINA; stamina = maxStamina;
     for (int i = 0; i < STYLE_COUNT; i++) cd[i] = 0;
     for (int i = 0; i < WATER_FORM_COUNT; i++) waterCd[i] = 0;
     for (int i = 0; i < FLAME_FORM_COUNT; i++) flameCd[i] = 0;
-    waterForm = -1; flameForm = -1; formSeg = 0; formTick = 0; deadCalmT = 0; flameGuardT = 0;
+    for (int i = 0; i < STONE_FORM_COUNT; i++) stoneCd[i] = 0;
+    waterForm = -1; flameForm = -1; stoneForm = -1;
+    formSeg = 0; formTick = 0; deadCalmT = 0; flameGuardT = 0; stoneGuardT = 0;
+    flameGuardDurability = flameGuardDurabilityMax = 0; flameGuardRekindled = false;
+    stoneGuardDurability = stoneGuardDurabilityMax = 0; stoneGuardReinforced = false;
     iframes = 0;
     hitMem.Clear();
     state = PState::Normal;
@@ -98,6 +292,20 @@ Rectangle Player::Rect() const {
 void Player::AddHit(CombatSystem& cs, Effects& fx, Rectangle r, float dmg,
                     float kbx, float kby, float life, HitKind kind, int id, int style) {
     if (style >= 0 && prog) dmg *= prog->DmgMult(style);
+    if (prog && equipped == STYLE_FIRE && dmg > 0) {
+        if (kind == HitKind::Fire) dmg *= prog->flameStyle.FlameDamageMult();
+        else if (kind == HitKind::Basic) dmg *= prog->flameStyle.BasicDamageMult();
+
+        float crit = prog->flameStyle.CritChance();
+        if ((kind == HitKind::Fire || kind == HitKind::Basic) && crit > 0 && frnd(0, 1) < crit) {
+            dmg *= prog->flameStyle.CritMult();
+            Vector2 c = { r.x + r.width * 0.5f, r.y + r.height * 0.5f };
+            fx.Text(c, C(255, 225, 130), FlameStyleMaxed(FLAME_FS_OFFENSIVE) ? 1.1f : 0.95f,
+                    FlameStyleMaxed(FLAME_FS_OFFENSIVE) ? "BLAZING CRIT" : "CRIT");
+            fx.Sparks(c, -90, 180, FlameStyleMaxed(FLAME_FS_OFFENSIVE) ? 10 : 6,
+                      C(255, 210, 90), 260, 2.4f);
+        }
+    }
     if (mistAmbushT > 0) {                       // strike from the mist
         dmg *= 2.0f;
         mistAmbushT = 0;
@@ -118,7 +326,7 @@ void Player::StartCombo(int stage) {
 }
 
 void Player::UpdateAttack(float dt, CombatSystem& cs, Effects& fx) {
-    stateTimer += dt;
+    stateTimer += dt * FlameBasicSpeedMult();
     const ComboStep& c = COMBO[comboStage - 1];
 
     // small forward drift through windup+active, then brake
@@ -573,12 +781,23 @@ bool Player::TryStartFlameForm(CombatSystem& cs, Effects& fx) {
         if (IsKeyPressed(FKEY[i])) { f = i; break; }
     if (f < 0) return false;
     if (flameCd[f] > 0) { PlaySfx(SFX_PICKUP, 0.22f, 0.55f); return false; }
+    float staminaCost = FlameStaminaCost(f);
+    if (stamina + 0.01f < staminaCost) {
+        fx.Text({ pos.x, pos.y - h - 18 }, C(210, 150, 110), 0.82f, "LOW STAMINA");
+        PlaySfx(SFX_PICKUP, 0.28f, 0.55f);
+        return false;
+    }
+    stamina = fmaxf(stamina - staminaCost, 0.0f);
 
     flameForm = f;
     state = PState::FlameForm;
     stateTimer = 0; didHitFrame = false; formSeg = 0; formTick = 0;
     multiAttackId = cs.NewId();
-    flameCd[f] = FlameFormBaseCd(f) * (prog ? prog->flame.CdMult(f) : 1.0f);
+    flameCd[f] = FlameFormBaseCd(f) * (prog ? prog->flame.CdMult(f) * FlameCooldownMult() : 1.0f);
+    if (FlameStyleMaxed(FLAME_FS_MASTERY)) {
+        for (int i = 0; i < FLAME_FORM_COUNT; i++)
+            if (i != f) flameCd[i] = fmaxf(flameCd[i] - 0.35f, 0.0f);
+    }
     int lv = prog ? prog->flame.Level(f) : 1;
     float flair = 0.9f + 0.13f * (lv - 1);
     if (hasHunt && (f == FF_UNKNOWING_FIRE || f == FF_FLAME_TIGER ||
@@ -591,7 +810,9 @@ bool Player::TryStartFlameForm(CombatSystem& cs, Effects& fx) {
             iframes = fmaxf(iframes, 0.22f + 0.03f * lv);
             break;
         case FF_BLOOMING_UNDULATION:
-            flameGuardT = 0.78f + 0.09f * lv;
+            StartFlameGuard(0.78f + 0.09f * lv,
+                            (22.0f + 7.0f * lv) *
+                            (prog ? prog->flameStyle.BarrierDurabilityMult() : 1.0f));
             iframes = fmaxf(iframes, flameGuardT);
             break;
         case FF_RENGOKU:
@@ -602,6 +823,8 @@ bool Player::TryStartFlameForm(CombatSystem& cs, Effects& fx) {
             iframes = fmaxf(iframes, 0.12f + 0.02f * lv);
             break;
     }
+    if (FlameStyleMaxed(FLAME_FS_SWIFT))
+        iframes = fmaxf(iframes, 0.30f);
 
     fx.Text({ pos.x, pos.y - h - 18 }, FlameCol(lv), 0.92f, "%s", FORM_CALL[f]);
     FlameWake(fx, pos, facing, flair, lv);
@@ -618,8 +841,9 @@ void Player::UpdateFlameForm(float dt, CombatSystem& cs, Effects& fx) {
     const int lv = ff.Level(f);
     const bool maxed = ff.Maxed(f);
     const float dmgM = ff.DmgMult(f);
-    const float rngM = ff.RangeMult(f);
-    const float spdM = ff.SpeedMult(f);
+    const float rngM = ff.RangeMult(f) * FlameFormRangeMult();
+    const float spdM = ff.SpeedMult(f) * FlameFormSpeedMult();
+    const float dashM = FlameDashMult();
     const float flair = 0.9f + 0.13f * (lv - 1);
     const Color FC = FlameCol(lv);
     const Color CORE = FlameCore(lv);
@@ -629,7 +853,7 @@ void Player::UpdateFlameForm(float dt, CombatSystem& cs, Effects& fx) {
     // 1 - Unknowing Fire: explosive straight-line draw slash
     case FF_UNKNOWING_FIRE: {
         float dur = (maxed ? 0.34f : 0.27f) / spdM;
-        vel.x = facing * 1120.0f * spdM;
+        vel.x = facing * 1120.0f * spdM * dashM;
         FlameWake(fx, pos, facing, 0.8f * flair, lv);
         Rectangle r = { pos.x - 70.0f + facing * 48.0f, pos.y - 42,
                         140.0f * rngM, 84 };
@@ -728,7 +952,7 @@ void Player::UpdateFlameForm(float dt, CombatSystem& cs, Effects& fx) {
             formTick = 0.16f / spdM;
             formSeg++;
             multiAttackId = cs.NewId();
-            vel.x = facing * (760.0f + 80.0f * formSeg) * spdM;
+            vel.x = facing * (760.0f + 80.0f * formSeg) * spdM * dashM;
             float reach = (142.0f + 14.0f * formSeg) * rngM;
             Rectangle r = { facing > 0 ? pos.x - 10.0f : pos.x - reach + 10.0f,
                             pos.y - 56.0f, reach, 112.0f };
@@ -749,7 +973,7 @@ void Player::UpdateFlameForm(float dt, CombatSystem& cs, Effects& fx) {
     // 6 - Solar Heat Haze: original feint that phases through and backstabs
     case FF_SOLAR_HEAT_HAZE: {
         float dur = (maxed ? 0.48f : 0.38f) / spdM;
-        vel.x = facing * 980.0f * spdM;
+        vel.x = facing * 980.0f * spdM * dashM;
         FlameWake(fx, pos, facing, 0.6f * flair, lv);
         formTick -= dt;
         if (formTick <= 0) {
@@ -782,7 +1006,7 @@ void Player::UpdateFlameForm(float dt, CombatSystem& cs, Effects& fx) {
     // 7 - Inferno Wheel: original rolling crowd-clearer
     case FF_INFERNO_WHEEL: {
         float dur = 0.62f + 0.04f * lv;
-        vel.x = facing * 520.0f * spdM;
+        vel.x = facing * 520.0f * spdM * dashM;
         formTick -= dt;
         if (formTick <= 0) { formTick = 0.085f; multiAttackId = cs.NewId(); }
         float R = 88.0f * rngM;
@@ -846,7 +1070,7 @@ void Player::UpdateFlameForm(float dt, CombatSystem& cs, Effects& fx) {
             fx.Ring(pos, 20.0f + stateTimer * 170.0f, 120.0f + stateTimer * 170.0f,
                     420, 7, FC);
         } else {
-            vel.x = facing * 1320.0f * spdM;
+            vel.x = facing * 1320.0f * spdM * dashM;
             FlameWake(fx, pos, facing, 1.25f * flair, lv);
             Rectangle r = { pos.x - 126.0f + facing * 86.0f, pos.y - 82.0f,
                             252.0f * rngM, 164.0f };
@@ -875,6 +1099,258 @@ void Player::UpdateFlameForm(float dt, CombatSystem& cs, Effects& fx) {
     }
 }
 
+// --- Stone Breathing: five heavy forms --------------------------------------
+bool Player::TryStartStoneForm(CombatSystem& cs, Effects& fx) {
+    static const int FKEY[STONE_FORM_COUNT] = {
+        KEY_ONE, KEY_TWO, KEY_THREE, KEY_FOUR, KEY_FIVE
+    };
+    static const char* FORM_CALL[STONE_FORM_COUNT] = {
+        "SERPENTINITE BIPOLAR", "UPPER SMASH", "STONE SKIN",
+        "VOLCANIC ROCK: RAPID CONQUEST", "ARCS OF JUSTICE"
+    };
+
+    int f = -1;
+    for (int i = 0; i < STONE_FORM_COUNT; i++)
+        if (IsKeyPressed(FKEY[i])) { f = i; break; }
+    if (f < 0) return false;
+    if (!onGround) {
+        fx.Text({ pos.x, pos.y - h - 18 }, C(170, 155, 140), 0.82f, "NEED GROUND");
+        PlaySfx(SFX_PICKUP, 0.25f, 0.55f);
+        return false;
+    }
+    if (stoneCd[f] > 0) { PlaySfx(SFX_PICKUP, 0.22f, 0.55f); return false; }
+
+    StoneForms& sf = prog->stone;
+    int lv = sf.Level(f);
+    stoneForm = f;
+    state = PState::StoneForm;
+    stateTimer = 0;
+    didHitFrame = false;
+    formSeg = 0;
+    formTick = 0;
+    multiAttackId = cs.NewId();
+    stoneCd[f] = StoneFormBaseCd(f) * sf.CdMult(f);
+    vel.x = 0;
+
+    switch (f) {
+        case SF_SERPENTINITE_BIPOLAR:
+            iframes = fmaxf(iframes, 0.14f);
+            PlaySfx(SFX_CHAIN, 0.9f, 0.92f);
+            break;
+        case SF_UPPER_SMASH:
+            PlaySfx(SFX_STONE, 0.72f, 0.62f);
+            break;
+        case SF_STONE_SKIN:
+            StartStoneGuard(1.25f + 0.12f * lv, (58.0f + 20.0f * lv) * sf.GuardMult(f));
+            iframes = fmaxf(iframes, 0.22f);
+            fx.Ring(pos, 18, 140.0f + 16.0f * lv, 430, 8, StoneCol(lv));
+            PlaySfx(SFX_CHAIN, 0.92f, 0.74f);
+            PlaySfx(SFX_STONE, 0.78f, 0.58f);
+            break;
+        case SF_RAPID_CONQUEST:
+            iframes = fmaxf(iframes, 0.16f);
+            PlaySfx(SFX_CHAIN, 0.95f, 0.78f);
+            break;
+        case SF_ARCS_OF_JUSTICE:
+            iframes = fmaxf(iframes, 0.28f);
+            fx.Flash(C(190, 180, 160), 0.12f + 0.02f * lv);
+            fx.Ring(pos, 26, 240.0f + 22.0f * lv, 560, 12, StoneCol(lv));
+            PlaySfx(SFX_CHAIN, 1.0f, 0.62f);
+            PlaySfx(SFX_STONE, 0.95f, 0.50f);
+            break;
+    }
+
+    fx.Text({ pos.x, pos.y - h - 18 }, StoneCol(lv), 0.9f, "%s", FORM_CALL[f]);
+    if (lv >= 4) fx.Ring(pos, 10, 80.0f + 10.0f * lv, 520, 5, StoneCore(lv));
+    return true;
+}
+
+void Player::UpdateStoneForm(float dt, CombatSystem& cs, Effects& fx) {
+    stateTimer += dt;
+    if (!prog) { state = PState::Normal; return; }
+    StoneForms& sf = prog->stone;
+    const int f = stoneForm;
+    const int lv = sf.Level(f);
+    const bool maxed = sf.Maxed(f);
+    const float dmgM = sf.DmgMult(f);
+    const float rngM = sf.RangeMult(f);
+    const float spdM = sf.SpeedMult(f);
+    const Color SC = StoneCol(lv);
+    const Color CORE = StoneCore(lv);
+
+    switch (f) {
+    // 1 - Serpentinite Bipolar: chained axe/flail pressure front and back
+    case SF_SERPENTINITE_BIPOLAR: {
+        float dur = (maxed ? 0.82f : 0.70f) / spdM;
+        vel.x *= 1.0f - Clampf(7.5f * dt, 0, 1);
+        if (stateTimer >= 0.20f / spdM && formSeg == 0) {
+            formSeg = 1;
+            float reach = 210.0f * rngM;
+            Rectangle front = { facing > 0 ? pos.x + 2.0f : pos.x - reach - 2.0f,
+                                pos.y - 58.0f, reach, 116.0f };
+            AddHit(cs, fx, front, 32.0f * dmgM, facing * 480.0f, -250, 0.08f,
+                   HitKind::Stone, cs.NewId(), -1);
+            fx.SlashArc({ pos.x + facing * reach * 0.45f, pos.y - 10.0f },
+                        96.0f * rngM, facing > 0 ? -70 : 250,
+                        facing > 0 ? 48 : 132, SC);
+            StoneChainTrail(fx, { pos.x + facing * 100.0f, pos.y - 12.0f }, facing, lv);
+            fx.AddShake(0.22f);
+            PlaySfx(SFX_CHAIN, 0.72f, 0.88f);
+        }
+        if (stateTimer >= 0.42f / spdM && formSeg == 1) {
+            formSeg = 2;
+            float reach = 150.0f * rngM;
+            Rectangle rear = { facing > 0 ? pos.x - reach : pos.x,
+                               pos.y - 50.0f, reach, 96.0f };
+            AddHit(cs, fx, rear, 24.0f * dmgM, -facing * 300.0f, -180, 0.08f,
+                   HitKind::Stone, cs.NewId(), -1);
+            fx.Ring({ pos.x - facing * 72.0f, pos.y - 8.0f }, 8, 84.0f * rngM, 420, 5, CORE);
+            StoneChainTrail(fx, { pos.x - facing * 74.0f, pos.y - 8.0f }, -facing, lv);
+            PlaySfx(SFX_CHAIN, 0.78f, 0.78f);
+        }
+        if (maxed && stateTimer >= 0.62f / spdM && formSeg == 2) {
+            formSeg = 3;
+            Rectangle cross = { pos.x - 120.0f * rngM, pos.y - 66.0f,
+                                240.0f * rngM, 132.0f };
+            AddHit(cs, fx, cross, 28.0f * dmgM, facing * 260.0f, -310, 0.08f,
+                   HitKind::Stone, cs.NewId(), -1);
+            StoneBurst(fx, { pos.x, cfg::GROUND_Y - 4 }, 0.95f * rngM, lv);
+            fx.AddShake(0.34f);
+        }
+        if (stateTimer >= dur) state = PState::Normal;
+        break;
+    }
+    // 2 - Upper Smash: committed launcher and brute/boss punish
+    case SF_UPPER_SMASH: {
+        float impactT = 0.44f / spdM;
+        vel.x *= 1.0f - Clampf(8.0f * dt, 0, 1);
+        if (stateTimer < impactT) {
+            if (GetRandomValue(0, 2) == 0) fx.Dust({ pos.x + frnd(-32, 32), cfg::GROUND_Y });
+            if (fmodf(stateTimer, 0.09f) < dt) fx.Ring(pos, 14, 70.0f + 16.0f * lv, 420, 5, SC);
+        } else if (!didHitFrame) {
+            didHitFrame = true;
+            float reach = 176.0f * rngM;
+            Rectangle r = { facing > 0 ? pos.x - 40.0f : pos.x - reach + 40.0f,
+                            pos.y - 118.0f * rngM, reach, 184.0f * rngM };
+            AddHit(cs, fx, r, 62.0f * dmgM, facing * 430.0f, -620, 0.11f,
+                   HitKind::Stone, cs.NewId(), -1);
+            StoneBurst(fx, { pos.x + facing * 50.0f, cfg::GROUND_Y - 4 }, 1.45f * rngM, lv);
+            fx.SlashArc({ pos.x + facing * 24.0f, pos.y - 28.0f },
+                        128.0f * rngM, facing > 0 ? 120 : 60,
+                        facing > 0 ? -50 : 230, CORE);
+            if (maxed) {
+                Rectangle quake = { facing > 0 ? pos.x + 24.0f : pos.x - 404.0f * rngM,
+                                    cfg::GROUND_Y - 86.0f, 380.0f * rngM, 90.0f };
+                AddHit(cs, fx, quake, 30.0f * dmgM, facing * 520.0f, -340, 0.10f,
+                       HitKind::Stone, cs.NewId(), -1);
+                for (int i = 0; i < 4; i++)
+                    fx.QuakeTrail({ pos.x + facing * (70.0f + i * 82.0f), cfg::GROUND_Y });
+            }
+            fx.AddShake(0.62f + 0.04f * lv);
+            fx.AddHitstop(0.09f);
+            PlaySfx(SFX_STONE, 1.0f, 0.52f);
+        }
+        if (stateTimer >= 0.92f / spdM) state = PState::Normal;
+        break;
+    }
+    // 3 - Stone Skin: primary defensive form with shield durability
+    case SF_STONE_SKIN: {
+        float dur = 1.25f + 0.12f * lv;
+        vel.x = 0;
+        stoneGuardT = fmaxf(stoneGuardT, fmaxf(dur - stateTimer, 0));
+        formTick -= dt;
+        if (formTick <= 0) {
+            formTick = 0.18f / spdM;
+            multiAttackId = cs.NewId();
+            float R = (112.0f + 10.0f * lv) * rngM;
+            AddHit(cs, fx, { pos.x - R, pos.y - R, R * 2.0f, R * 2.0f },
+                   11.0f * dmgM, 0, -155, 0.05f, HitKind::Stone, multiAttackId, -1);
+            fx.SlashArc(pos, R, stateTimer * 840.0f, stateTimer * 840.0f + 190.0f, SC);
+            fx.Ring(pos, R * 0.55f, R * 1.02f, 360, 6, CORE);
+            fx.Dust({ pos.x + frnd(-36, 36), cfg::GROUND_Y });
+            PlaySfx(SFX_CHAIN, 0.42f, 1.05f);
+        }
+        if (stoneGuardDurability <= 0 || stateTimer >= dur) {
+            stoneGuardT = 0;
+            stoneGuardDurability = 0;
+            if (stateTimer >= dur && maxed) {
+                StoneBurst(fx, { pos.x, cfg::GROUND_Y - 4 }, 1.25f, lv);
+                AddHit(cs, fx, { pos.x - 150.0f * rngM, pos.y - 100.0f,
+                                 300.0f * rngM, 164.0f }, 34.0f * dmgM,
+                       0, -360, 0.08f, HitKind::Stone, cs.NewId(), -1);
+            }
+            state = PState::Normal;
+        }
+        break;
+    }
+    // 4 - Volcanic Rock, Rapid Conquest: repeated advancing control hits
+    case SF_RAPID_CONQUEST: {
+        int hits = maxed ? 6 : 5;
+        formTick -= dt;
+        vel.x *= 1.0f - Clampf(5.5f * dt, 0, 1);
+        if (formTick <= 0 && formSeg < hits) {
+            formTick = 0.16f / spdM;
+            formSeg++;
+            multiAttackId = cs.NewId();
+            vel.x = facing * (135.0f + 18.0f * lv);
+            float reach = (190.0f + 14.0f * formSeg) * rngM;
+            Rectangle r = { facing > 0 ? pos.x - 16.0f : pos.x - reach + 16.0f,
+                            pos.y - 68.0f, reach, 132.0f };
+            AddHit(cs, fx, r, (formSeg == hits ? 34.0f : 18.0f) * dmgM,
+                   facing * (formSeg == hits ? 470.0f : 260.0f), -260, 0.065f,
+                   HitKind::Stone, multiAttackId, -1);
+            Vector2 c = { pos.x + facing * (70.0f + formSeg * 16.0f), pos.y - 16.0f };
+            fx.SlashArc(c, 84.0f + formSeg * 8.0f, -58, 58, SC);
+            StoneChainTrail(fx, c, facing, lv);
+            if (formSeg == hits) {
+                StoneBurst(fx, { pos.x + facing * 72.0f, cfg::GROUND_Y - 4 }, 1.15f * rngM, lv);
+                fx.AddShake(0.45f + 0.03f * lv);
+                fx.AddHitstop(0.06f);
+                PlaySfx(SFX_STONE, 0.9f, 0.62f);
+            } else {
+                fx.AddShake(0.14f);
+                PlaySfx(SFX_CHAIN, 0.56f, 0.78f + formSeg * 0.05f);
+            }
+        }
+        if (formSeg >= hits && formTick <= 0) state = PState::Normal;
+        break;
+    }
+    // 5 - Arcs of Justice: slow ultimate with sweeping arena arcs
+    case SF_ARCS_OF_JUSTICE: {
+        float dur = (1.55f + 0.04f * lv) / spdM;
+        vel.x *= 1.0f - Clampf(9.0f * dt, 0, 1);
+        if (GetRandomValue(0, 1) == 0)
+            StoneChainTrail(fx, { pos.x + frnd(-160, 160), pos.y + frnd(-80, 30) }, facing, lv);
+        const float marks[5] = { 0.30f, 0.52f, 0.76f, 1.02f, 1.24f };
+        if (formSeg < 5 && stateTimer >= marks[formSeg] / spdM) {
+            int hit = formSeg++;
+            int dir = (hit % 2 == 0) ? facing : -facing;
+            bool finisher = hit == 4;
+            float width = (finisher ? 650.0f : 360.0f) * rngM;
+            float x = finisher ? pos.x - width * 0.5f
+                               : (dir > 0 ? pos.x - 30.0f : pos.x - width + 30.0f);
+            Rectangle r = { x, pos.y - 112.0f, width, 204.0f };
+            AddHit(cs, fx, r, (finisher ? 86.0f : 38.0f) * dmgM,
+                   dir * (finisher ? 650.0f : 430.0f), finisher ? -650.0f : -340.0f,
+                   0.11f, HitKind::Stone, cs.NewId(), -1);
+            Vector2 c = { finisher ? pos.x : pos.x + dir * 158.0f, cfg::GROUND_Y - 22.0f };
+            StoneBurst(fx, c, finisher ? 1.85f * rngM : 1.08f * rngM, lv);
+            fx.Ring(pos, 46.0f + hit * 34.0f, finisher ? 390.0f * rngM : 240.0f * rngM,
+                    620, finisher ? 14 : 9, SC);
+            fx.AddShake(finisher ? 0.86f : 0.36f);
+            fx.AddHitstop(finisher ? 0.12f : 0.05f);
+            PlaySfx(finisher ? SFX_STONE : SFX_CHAIN, finisher ? 1.0f : 0.82f,
+                    finisher ? 0.46f : 0.70f);
+        }
+        if (stateTimer >= dur) state = PState::Normal;
+        break;
+    }
+    default:
+        state = PState::Normal;
+        break;
+    }
+}
+
 void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
     UpdateTechs(dt, cs, fx);     // techniques outlive states, even death throes
 
@@ -889,13 +1365,18 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
     for (int i = 0; i < STYLE_COUNT; i++) cd[i] = fmaxf(cd[i] - dt, 0);
     for (int i = 0; i < WATER_FORM_COUNT; i++) waterCd[i] = fmaxf(waterCd[i] - dt, 0);
     for (int i = 0; i < FLAME_FORM_COUNT; i++) flameCd[i] = fmaxf(flameCd[i] - dt, 0);
+    for (int i = 0; i < STONE_FORM_COUNT; i++) stoneCd[i] = fmaxf(stoneCd[i] - dt, 0);
     deadCalmT = fmaxf(deadCalmT - dt, 0);
     flameGuardT = fmaxf(flameGuardT - dt, 0);
+    if (flameGuardT <= 0) flameGuardDurability = 0;
+    stoneGuardT = fmaxf(stoneGuardT - dt, 0);
+    if (stoneGuardT <= 0) stoneGuardDurability = 0;
     iframes = fmaxf(iframes - dt, 0);
     hurtFlash = fmaxf(hurtFlash - dt, 0);
     hiddenT = fmaxf(hiddenT - dt, 0);
-    chillT = fmaxf(chillT - dt, 0);
+    chillT = fmaxf(chillT - dt / fmaxf(FlameCrowdControlMult(), 0.25f), 0);
     mistAmbushT = fmaxf(mistAmbushT - dt, 0);
+    stamina = fminf(maxStamina, stamina + FlameStaminaRegen() * dt);
 
     bool left  = IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT);
     bool right = IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT);
@@ -925,6 +1406,7 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
     switch (state) {
         case PState::Normal: {
             float spdBonus = hiddenT > 0 ? 1.4f : 1.0f;    // swift in the mist
+            spdBonus *= FlameMoveSpeedMult();
             spdBonus *= 1.0f - 0.55f * crouchT;            // low stance, careful steps
             if (chillT > 0) spdBonus *= 0.6f;              // frozen to the bone
             vel.x = move * cfg::P_SPEED * spdBonus;
@@ -960,6 +1442,10 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
             else if (equipped == STYLE_FIRE) {
                 // Flame Breathing: nine forms, each on its own number key
                 TryStartFlameForm(cs, fx);
+            }
+            else if (equipped == STYLE_STONE) {
+                // Stone Breathing: five heavy forms, each on its own number key
+                TryStartStoneForm(cs, fx);
             }
             else if (styleP[STYLE_STONE] && cd[STYLE_STONE] <= 0) {
                 state = PState::Stone;
@@ -1010,7 +1496,7 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
             break;
 
         case PState::UpSlash: {
-            stateTimer += dt;
+            stateTimer += dt * FlameBasicSpeedMult();
             vel.x *= 1.0f - Clampf(8.0f * dt, 0, 1);
             if (!didHitFrame && stateTimer >= 0.07f) {
                 didHitFrame = true;
@@ -1086,6 +1572,9 @@ void Player::Update(float dt, CombatSystem& cs, Effects& fx) {
             break;
         case PState::FlameForm:
             UpdateFlameForm(dt, cs, fx);
+            break;
+        case PState::StoneForm:
+            UpdateStoneForm(dt, cs, fx);
             break;
         case PState::FireWindup: {
             stateTimer += dt;
@@ -1300,29 +1789,51 @@ bool Player::TakeDamage(float dmg, float kbx, Effects& fx, bool heavy) {
         return false;
     }
     if (iframes > 0 || state == PState::Dead) return false;
-    hp -= dmg;
+    float dmgTaken = dmg * FlameDamageTakenMult();
+    float kbTaken = kbx * FlameKnockbackTakenMult();
+    float ccTaken = FlameCrowdControlMult();
+    if (StoneGuardActive()) {
+        bool blocked = AbsorbStoneGuard(heavy ? 14 : 7, fx);
+        if (blocked) {
+            iframes = fmaxf(iframes, 0.08f);
+            PlaySfx(SFX_STONE, 0.5f, 0.82f);
+            return false;
+        }
+        dmgTaken *= 0.45f;
+        kbTaken *= 0.35f;
+        ccTaken *= 0.55f;
+    }
+    if (FlameStyleMaxed(FLAME_FS_ENDURANCE) && hp - dmgTaken <= 0 && stamina >= 35.0f) {
+        stamina -= 35.0f;
+        dmgTaken = fmaxf(hp - 1.0f, 0.0f);
+        iframes = fmaxf(iframes, 1.15f);
+        fx.Text({ pos.x, pos.y - h - 16 }, C(255, 225, 130), 1.05f, "UNYIELDING");
+        fx.Ring(pos, 18, 118, 520, 8, C(255, 190, 90));
+        PlaySfx(SFX_FIRE, 0.7f, 0.8f);
+    }
+    hp -= dmgTaken;
     hurtFlash = 0.2f;
-    iframes = cfg::P_IFRAMES;
+    iframes = fmaxf(iframes, cfg::P_IFRAMES);
     hiddenT = 0;                 // a hit tears away the mist
-    hurtLen = heavy ? 0.55f : 0.28f;
-    vel.x = kbx;
-    vel.y = heavy ? -430.0f : -260.0f;
+    hurtLen = (heavy ? 0.55f : 0.28f) * ccTaken;
+    vel.x = kbTaken;
+    vel.y = (heavy ? -430.0f : -260.0f) * FlameKnockbackTakenMult();
     // blood answers every wound - the harder the blow, the wider the spray
-    fx.BloodSpray({ pos.x, pos.y - 8 }, kbx > 0 ? 1 : -1,
-                  heavy ? 2.1f : Clampf(0.9f + dmg * 0.035f, 0.9f, 1.8f));
+    fx.BloodSpray({ pos.x, pos.y - 8 }, kbTaken > 0 ? 1 : -1,
+                  heavy ? 2.1f : Clampf(0.9f + dmgTaken * 0.035f, 0.9f, 1.8f));
     if (heavy) {
         // a Demon King's blow: sent flying like in the films
         fx.AddShake(0.65f);
         fx.AddHitstop(0.08f);
-        fx.Sparks({ pos.x, pos.y - 6 }, kbx > 0 ? 0.0f : 180.0f, 70, 16,
+        fx.Sparks({ pos.x, pos.y - 6 }, kbTaken > 0 ? 0.0f : 180.0f, 70, 16,
                   C(255, 90, 70), 540, 3.5f);
         fx.Ring({ pos.x, pos.y - 6 }, 8, 90, 480, 6, C(255, 120, 100));
         PlaySfx(SFX_STONE, 0.65f, 1.25f);
     } else {
-        fx.AddShake(Clampf(0.22f + dmg * 0.012f, 0, 0.6f));
+        fx.AddShake(Clampf(0.22f + dmgTaken * 0.012f, 0, 0.6f));
         fx.AddHitstop(0.03f);
     }
-    fx.Text({ pos.x, pos.y - h }, C(255, 80, 80), 1.1f, "-%.0f", dmg);
+    fx.Text({ pos.x, pos.y - h }, C(255, 80, 80), 1.1f, "-%.0f", dmgTaken);
     PlaySfx(SFX_HURT, 0.8f);
     if (hp <= 0) {
         hp = 0;
@@ -1505,6 +2016,31 @@ void Player::Draw() const {
                     ang = -24.0f; break;
             }
             break;
+        case PState::StoneForm:
+            switch (stoneForm) {
+                case SF_SERPENTINITE_BIPOLAR:
+                    ang = -34.0f + sinf(gt * 34.0f) * 34.0f;
+                    break;
+                case SF_UPPER_SMASH:
+                    ang = stateTimer < 0.44f ? -112.0f : 72.0f;
+                    break;
+                case SF_STONE_SKIN:
+                    ang = fmodf(gt * 1180.0f, 360.0f);
+                    spinBlade = true;
+                    break;
+                case SF_RAPID_CONQUEST:
+                    ang = fmodf(gt * 1320.0f, 360.0f);
+                    spinBlade = true;
+                    break;
+                case SF_ARCS_OF_JUSTICE:
+                    ang = fmodf(gt * 980.0f, 360.0f);
+                    spinBlade = true;
+                    break;
+                default:
+                    ang = 65.0f;
+                    break;
+            }
+            break;
         case PState::Love:       ang = fmodf(gt * 1300.0f, 360.0f); spinBlade = true; break;
         case PState::Serpent:    ang = 8.0f + sinf(gt * 46.0f) * 55.0f; break;
         case PState::Wind:
@@ -1532,7 +2068,7 @@ void Player::Draw() const {
     if (state == PState::Water || state == PState::WaterForm) bladeCol = C(120, 200, 255);
     if (state == PState::FireWindup || state == PState::FireRecover || state == PState::FlameForm)
         bladeCol = C(255, 170, 90);
-    if (state == PState::Stone) bladeCol = C(190, 182, 170);
+    if (state == PState::Stone || state == PState::StoneForm) bladeCol = C(190, 182, 170);
     if (state == PState::Love)  bladeCol = C(255, 150, 205);
     if (state == PState::Serpent) bladeCol = C(140, 225, 110);
     if (state == PState::Wind)  bladeCol = C(215, 248, 232);
@@ -1632,6 +2168,44 @@ void Player::Draw() const {
                            { pos.x + facing * 110.0f, pos.y - 6.0f },
                            8.0f * scale, Fade(aura, 0.18f * alpha));
                 break;
+        }
+    }
+
+    if (state == PState::StoneForm) {
+        int lv = prog ? prog->stone.Level(stoneForm) : 1;
+        Color stone = StoneCol(lv);
+        Color core = StoneCore(lv);
+        float pulse = 0.5f + 0.5f * sinf(gt * 13.0f);
+        float scale = 1.0f + 0.08f * (lv - 1);
+        if (stoneForm == SF_STONE_SKIN) {
+            Rectangle ward = StoneGuardZone();
+            DrawRectangleLinesEx(ward, 3, Fade(stone, 0.72f * alpha));
+            DrawRing(pos, 72.0f * scale, 78.0f * scale, 0, 360, 52,
+                     Fade(core, 0.30f * alpha));
+            DrawRing(pos, 118.0f * scale + pulse * 10.0f,
+                     124.0f * scale + pulse * 10.0f, gt * 260.0f,
+                     gt * 260.0f + 290.0f, 64, Fade(stone, 0.26f * alpha));
+            if (stoneGuardDurabilityMax > 0) {
+                float f = StoneGuardRatio();
+                DrawRectangle((int)(pos.x - 36), (int)(pos.y - h * 0.5f - 39), 72, 5, C(28, 25, 22));
+                DrawRectangle((int)(pos.x - 35), (int)(pos.y - h * 0.5f - 38),
+                              (int)(70 * f), 3, core);
+            }
+        } else if (stoneForm == SF_ARCS_OF_JUSTICE) {
+            DrawRing(pos, 120.0f + pulse * 26.0f, 128.0f + pulse * 26.0f,
+                     0, 360, 56, Fade(stone, 0.20f * alpha));
+            DrawLineEx({ pos.x - facing * 126.0f, pos.y + 6.0f },
+                       { pos.x + facing * 172.0f, pos.y - 34.0f },
+                       9.0f * scale, Fade(stone, 0.22f * alpha));
+        } else if (stoneForm == SF_UPPER_SMASH) {
+            DrawRectangle((int)(pos.x + facing * 30.0f - 20), (int)(pos.y - 120),
+                          40, 145, Fade(stone, 0.14f * alpha));
+            DrawRing({ pos.x + facing * 42.0f, cfg::GROUND_Y - 12.0f },
+                     32, 105.0f * scale, 0, 360, 36, Fade(core, 0.20f * alpha));
+        } else {
+            DrawLineEx({ pos.x - facing * 86.0f, pos.y - 4.0f },
+                       { pos.x + facing * 138.0f, pos.y - 18.0f },
+                       7.0f * scale, Fade(stone, 0.20f * alpha));
         }
     }
 
